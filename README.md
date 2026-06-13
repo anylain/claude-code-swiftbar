@@ -63,9 +63,6 @@ claude-code.swiftbar/        # SwiftBar 插件 bundle
 └── .assets/icons/           # 菜单栏 / 菜单图标(.b64 + .png)
 ```
 
-子目录加 `.` 前缀是有意为之:SwiftBar 2.0.1 还不支持 packaged plugin,
-用点开头可以让它在插件发现时跳过这些资源目录。
-
 ## 卸载
 
 ```bash
