@@ -379,7 +379,11 @@ for proj in sorted(os.listdir(projects_dir)):
     mtime = os.path.getmtime(latest)
     entries = read_last_entries(latest)
 
-    # Real cwd from jsonl content (handles cwd drift after the session started)
+    # Real cwd from jsonl content (handles cwd drift after the session started).
+    # NOTE: proj dir names encode '/' as '-', so decoding back is inherently lossy
+    # when real dir names contain literal dashes (e.g. "claude-code-swiftbar").
+    # Always prefer real_cwd from the jsonl; only fall back to the decoded path for
+    # display when real_cwd is unavailable. Never use the decoded path for cwd matching.
     real_cwd = read_first_cwd(latest)
     proj_path_decoded = "/" + proj.lstrip("-").replace("-", "/")
     proj_path = real_cwd or proj_path_decoded
@@ -394,7 +398,7 @@ for proj in sorted(os.listdir(projects_dir)):
     #   (b) a claude process has cwd matching this project (running but idle session,
     #       OR a forgotten/zombie claude — listed so the user can jump in and close it)
     is_recent = (now - mtime) < ALIVE_SECS
-    matched = cwd_map.get(proj_path) or cwd_map.get(proj_path_decoded) or []
+    matched = cwd_map.get(proj_path) if real_cwd else []
     alive = is_recent or bool(matched)
     state, detail = classify(entries, mtime, alive_proc=alive)
     if alive:
