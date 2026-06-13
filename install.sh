@@ -118,5 +118,52 @@ else
   echo "Make sure the plugin bundle is up to date, then re-run install.sh."
 fi
 
+# ── Install statusLine hook for authoritative session metadata ──────────────
+META_SCRIPT="$LINK/.bin/cc-meta-writer"
+
+if [ -x "$META_SCRIPT" ]; then
+  echo
+  echo "Installing Claude Code statusLine for metadata capture..."
+  /usr/bin/python3 - "$SETTINGS_FILE" "$META_SCRIPT" <<'PY'
+import json, sys
+
+settings_file = sys.argv[1]
+meta_script = sys.argv[2]
+new_cmd = f"bash \"{meta_script}\""
+
+try:
+    with open(settings_file) as f:
+        settings = json.load(f)
+except Exception:
+    settings = {}
+
+existing = settings.get("statusLine")
+new_entry = {"type": "command", "command": new_cmd}
+
+if isinstance(existing, dict) and existing == new_entry:
+    print("  statusLine already points to cc-meta-writer — nothing to do.")
+elif isinstance(existing, dict):
+    cur_type = existing.get("type", "?")
+    cur_cmd = existing.get("command", "(no command)")
+    print("  WARNING: existing statusLine detected:")
+    print(f"    type={cur_type}, command={cur_cmd}")
+    print("  Skipping to avoid clobbering. To enable cc-meta-writer, either:")
+    print("    (a) replace settings.json statusLine with:")
+    print(f"        {json.dumps(new_entry)}")
+    print("    (b) chain it: have your existing statusline tool call")
+    print(f"        cc-meta-writer first (it prints empty stdout).")
+else:
+    settings["statusLine"] = new_entry
+    with open(settings_file, "w") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"  statusLine installed: {new_cmd}")
+    print("  Run /reload-plugins or restart Claude Code to activate.")
+PY
+else
+  echo
+  echo "Warning: cc-meta-writer not found at $META_SCRIPT — skipping statusLine setup."
+fi
+
 echo
 echo "Next step: open SwiftBar menu > Refresh All (or restart SwiftBar)."
