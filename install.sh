@@ -51,6 +51,26 @@ else
   echo "Linked: $LINK -> $PLUGIN_SRC"
 fi
 
+# ── Migrate menu bar icon position when plugin filename changes ────────────
+# SwiftBar stores each plugin's icon position under
+# `NSStatusItem Preferred Position <filename>` in com.ameba.SwiftBar prefs.
+# Renaming the plugin file resets the position; we copy the old value over
+# so users upgrading from older versions keep their icon where they put it.
+NEW_KEY="NSStatusItem Preferred Position claude-code.10s.sh"
+if defaults read com.ameba.SwiftBar "$NEW_KEY" >/dev/null 2>&1; then
+  : # already migrated, keep the new value
+else
+  for OLD_NAME in plugin.1s.sh plugin.3s.sh plugin.10s.sh claude-code.3s.sh; do
+    OLD_KEY="NSStatusItem Preferred Position $OLD_NAME"
+    POSITION="$(defaults read com.ameba.SwiftBar "$OLD_KEY" 2>/dev/null || true)"
+    if [ -n "$POSITION" ]; then
+      defaults write com.ameba.SwiftBar "$NEW_KEY" -int "$POSITION"
+      echo "  Migrated menu bar icon position from $OLD_NAME → claude-code.10s.sh ($POSITION)"
+      break
+    fi
+  done
+fi
+
 # ── Install Claude Code hooks for event-driven status ──────────────────────
 HOOK_SCRIPT="$LINK/.bin/cc-status-writer"
 SETTINGS_FILE="$HOME/.claude/settings.json"
