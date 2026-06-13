@@ -126,19 +126,22 @@ rm -f "$tmp"
 # Multiple hooks within 1s share a single trailing worker; only the worker
 # that wins the LOCK race fires `swiftbar://refreshplugin?name=claude-code`.
 # Spec: docs/superpowers/specs/2026-06-14-swiftbar-cpu-perf-design.md
-PENDING="/tmp/cc-swiftbar-pending-$UID"
 LOCK="/tmp/cc-swiftbar-lock-$UID"
 
-date +%s.%N > "$PENDING" 2>/dev/null || true
-
+# Stale LOCK recovery: if a worker was SIGKILL'd mid-sleep, its EXIT trap
+# never ran and the LOCK would silence all future refreshes until reboot.
+# Treat any LOCK older than 5s as stale.
 if [ -e "$LOCK" ]; then
-  exit 0
+  if /usr/bin/python3 -c "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('$LOCK') > 5 else 1)" 2>/dev/null; then
+    rm -f "$LOCK"
+  else
+    exit 0
+  fi
 fi
 
 (
   : > "$LOCK"
   trap 'rm -f "$LOCK"' EXIT
   sleep 1
-  rm -f "$PENDING"
   /usr/bin/open -g "swiftbar://refreshplugin?name=claude-code" 2>/dev/null || true
 ) </dev/null >/dev/null 2>&1 &
