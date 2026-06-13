@@ -1,0 +1,55 @@
+#!/bin/bash
+# cc-meta-writer — Claude Code statusLine hook that writes session metadata
+# (session_id, cwd, model, workspace, output_style) to .cc-meta.json.
+# Read by the SwiftBar plugin as authoritative metadata source.
+#
+# Stdin: statusLine JSON payload from Claude Code.
+# Output: stdout is consumed by Claude Code as the status line text — we
+#   print an empty string so the plugin doesn't pollute the user's status
+#   line. (Users wanting a real statusline should chain another tool.)
+set -euo pipefail
+command -v python3 >/dev/null 2>&1 || { echo ""; exit 0; }
+
+tmp="$(mktemp)"
+cat > "$tmp"
+/usr/bin/python3 - "$tmp" <<'PY'
+import json, os, sys, time
+
+tmp_file = sys.argv[1]
+
+try:
+    with open(tmp_file) as f:
+        event = json.load(f)
+except Exception:
+    sys.exit(0)
+
+transcript_path = event.get("transcript_path", "")
+if not transcript_path:
+    sys.exit(0)
+
+proj_dir = os.path.dirname(transcript_path)
+if not os.path.isdir(proj_dir):
+    sys.exit(0)
+
+meta_file = os.path.join(proj_dir, ".cc-meta.json")
+
+payload = {
+    "session_id": event.get("session_id", ""),
+    "transcript_path": transcript_path,
+    "cwd": event.get("cwd", ""),
+    "workspace": event.get("workspace", {}),
+    "model": event.get("model", {}),
+    "version": event.get("version", ""),
+    "output_style": event.get("output_style", {}),
+    "last_seen": int(time.time()),
+}
+
+try:
+    with open(meta_file, "w") as f:
+        json.dump(payload, f)
+except Exception:
+    pass
+PY
+rm -f "$tmp"
+# Empty status line — plugin only uses this hook for metadata side-effect.
+echo ""
