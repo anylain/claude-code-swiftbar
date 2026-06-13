@@ -46,6 +46,7 @@ RUNNING_SECS = 30
 IDLE_SECS = 5
 ALIVE_SECS = 120  # jsonl modified within 2 min => session is "alive"
 SILENT_RUNNING_MAX = 600  # alive_proc + silent jsonl counted as running only up to 10 min
+HOOK_STATUS_TTL = 60  # hook-written .cc-status.json valid for 60s before fallback to classify
 
 def read_last_entries(path, n=20):
     try:
@@ -121,6 +122,18 @@ def host_from_entrypoint(ep):
     if "jetbrains" in ep or "intellij" in ep or "idea" in ep:
         return "idea"
     return None  # cli or unknown — defer to process inspection
+
+def read_hook_status(pdir):
+    """Read hook-written status file. Returns (state, detail) or (None, None)."""
+    path = os.path.join(pdir, ".cc-status.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+        if now - d.get("ts", 0) < HOOK_STATUS_TTL:
+            return d.get("state"), d.get("detail", "")
+    except Exception:
+        pass
+    return None, None
 
 # Inspect every live claude process: PID, env vars, cwd
 def inspect_claude_procs():
@@ -400,7 +413,15 @@ for proj in sorted(os.listdir(projects_dir)):
     is_recent = (now - mtime) < ALIVE_SECS
     matched = cwd_map.get(proj_path) if real_cwd else []
     alive = is_recent or bool(matched)
-    state, detail = classify(entries, mtime, alive_proc=alive)
+
+    # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
+    # Falls back to JSONL-based classify() for sessions without hooks configured.
+    hook_state, hook_detail = read_hook_status(pdir)
+    if hook_state:
+        state, detail = hook_state, hook_detail
+        alive = True  # hook only fires for live sessions
+    else:
+        state, detail = classify(entries, mtime, alive_proc=alive)
     if alive:
         if host_from_ep:
             host = host_from_ep

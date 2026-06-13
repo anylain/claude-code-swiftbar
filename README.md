@@ -31,6 +31,36 @@
 
 不需要 Homebrew 或其他额外依赖。
 
+## Hook（可选，大幅提升状态准确度）
+
+插件默认通过解析 JSONL 推断状态，有 1s 轮询延迟且依赖启发式规则。
+启用 Claude Code hooks 后，状态变为**事件驱动**，毫秒级响应，准确度大幅提升。
+
+只需在 `~/.claude/settings.json` 中加入：
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "PreToolUse":       [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "PostToolBatch":    [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "Stop":             [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "StopFailure":      [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "PermissionRequest":[{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "PreCompact":       [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "PostCompact":      [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "SessionStart":     [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
+    "SessionEnd":       [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}]
+  }
+}
+```
+
+**注意**：`$CLAUDE_PROJECT_DIR` 指向插件 bundle 根目录（即 `claude-code.swiftbar/`），
+hook 脚本位于 `.bin/cc-status-writer`。如果你把插件装在其他位置，请相应调整路径。
+
+Hook 写入的状态文件（`.cc-status.json`）有效期为 60 秒，超时后插件
+自动回退到 JSONL 解析方式，确保未配置 hook 的项目也正常工作。
+
 ## 安装
 
 ```bash
@@ -60,6 +90,7 @@ claude-code.swiftbar/        # SwiftBar 插件 bundle
 ├── plugin.1s.sh             # 主脚本(每 1s 刷新)
 ├── .Contents/Info.plist     # bundle metadata
 ├── .bin/cc-jump             # 窗口跳转助手(bash 脚本)
+├── .bin/cc-status-writer    # Hook 事件→状态写入器
 └── .assets/icons/           # 菜单栏 / 菜单图标(.b64 + .png)
 ```
 
