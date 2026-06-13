@@ -468,39 +468,18 @@ for proj in sorted(os.listdir(projects_dir)):
     entrypoint = read_entrypoint(latest)
     host_from_ep = host_from_entrypoint(entrypoint)
 
-    # Alive if EITHER:
-    #   (a) jsonl was written recently (< ALIVE_SECS), OR
-    #   (b) a claude process has cwd matching this project (running but idle session,
-    #       OR a forgotten/zombie claude — listed so the user can jump in and close it)
+    # Alive judgement happens in a 2nd pass below. Here we just stage the
+    # candidate proc match for this session.
     is_recent = (now - mtime) < ALIVE_SECS
     # claude parent proc doesn't chdir when the user `cd`s in a Bash tool, so its
     # lsof cwd may still be the session-start dir while meta.workspace.current_dir
     # has moved to a subdir. Fall back to meta.cwd if proj_path lookup misses.
-    matched = cwd_map.get(proj_path, []) if real_cwd else []
-    if not matched and meta.get("cwd") and meta["cwd"] != proj_path:
-        matched = cwd_map.get(meta["cwd"], [])
-    alive = is_recent or bool(matched)
-
-    # Aggregate has_active_child across all matched procs (any one with a child = working).
-    has_child = any(p.get("has_active_child") for p in (matched or []))
+    candidate_matched = cwd_map.get(proj_path, []) if real_cwd else []
+    if not candidate_matched and meta.get("cwd") and meta["cwd"] != proj_path:
+        candidate_matched = cwd_map.get(meta["cwd"], [])
 
     # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
-    # Falls back to JSONL-based classify() for sessions without hooks configured.
     hook_state, hook_detail = read_hook_status(pdir)
-    if hook_state:
-        state, detail = hook_state, hook_detail
-        alive = True  # hook only fires for live sessions
-    else:
-        state, detail = classify(entries, mtime, alive_proc=alive, has_active_child=has_child)
-    if alive:
-        if host_from_ep:
-            host = host_from_ep
-        elif matched:
-            host = matched[0]["host"]
-        else:
-            host = "other"
-    else:
-        host = host_from_ep or "other"
 
     sessions.append({
         "proj": proj_name,
@@ -508,11 +487,58 @@ for proj in sorted(os.listdir(projects_dir)):
         "session": os.path.basename(latest).replace(".jsonl", ""),
         "mtime": mtime,
         "age": now - mtime,
-        "state": state,
-        "detail": detail,
-        "host": host,
-        "alive": alive,
+        "is_recent": is_recent,
+        "candidate_matched": candidate_matched,
+        "hook_state": hook_state,
+        "hook_detail": hook_detail,
+        "host_from_ep": host_from_ep,
+        "entries": entries,
     })
+
+# 2nd pass: when multiple sessions resolve to the same proj_path (e.g. parent-dir
+# session whose statusLine meta points to a child dir collides with the child
+# session itself), only the most-recently-active session may claim the matched
+# claude procs. Others lose their proc match and fall back to mtime-only alive.
+newest_at_path = {}
+for idx, s in enumerate(sessions):
+    if not s["candidate_matched"]:
+        continue
+    cur = newest_at_path.get(s["proj_path"])
+    if cur is None or s["mtime"] > sessions[cur]["mtime"]:
+        newest_at_path[s["proj_path"]] = idx
+
+for idx, s in enumerate(sessions):
+    matched = s["candidate_matched"]
+    if matched and newest_at_path.get(s["proj_path"]) != idx:
+        matched = []  # an older same-path session — let the newest one own the procs
+    alive = s["is_recent"] or bool(matched)
+    has_child = any(p.get("has_active_child") for p in matched)
+
+    if s["hook_state"]:
+        state, detail = s["hook_state"], s["hook_detail"]
+        alive = True  # hook only fires for live sessions
+    else:
+        state, detail = classify(s["entries"], s["mtime"], alive_proc=alive, has_active_child=has_child)
+
+    if alive:
+        if s["host_from_ep"]:
+            host = s["host_from_ep"]
+        elif matched:
+            host = matched[0]["host"]
+        else:
+            host = "other"
+    else:
+        host = s["host_from_ep"] or "other"
+
+    s["state"] = state
+    s["detail"] = detail
+    s["host"] = host
+    s["alive"] = alive
+    s["matched"] = matched
+    # Drop staging-only fields so downstream code sees the same shape as before.
+    for k in ("is_recent", "candidate_matched", "hook_state", "hook_detail",
+              "host_from_ep", "entries"):
+        s.pop(k, None)
 
 # Drift fallback: any alive session still without a host (no entrypoint, no cwd-match)
 # gets assigned a stale claude proc — the one whose home project was modified longest ago.
