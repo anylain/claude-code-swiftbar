@@ -61,6 +61,32 @@ hook 脚本位于 `.bin/cc-status-writer`。如果你把插件装在其他位置
 Hook 写入的状态文件（`.cc-status.json`）有效期为 60 秒，超时后插件
 自动回退到 JSONL 解析方式，确保未配置 hook 的项目也正常工作。
 
+## statusLine（可选，让 cwd / model 实时准确）
+
+statusLine 钩子由 Claude Code 在每次状态行刷新时触发，给插件提供权威的
+`session_id`、`cwd`、`workspace.current_dir`、`model` 等元数据。**有了它，
+用户在会话中 `cd` 切目录时菜单栏 1-2 秒内就能反映**——不再依赖扫 JSONL 头部的
+启发式（那种方式拿到的是会话第一条记录的 cwd，会过时）。
+
+`install.sh` 会幂等地往 `~/.claude/settings.json` 写入：
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"<plugin>/.bin/cc-meta-writer\""
+  }
+}
+```
+
+**如果你已经装了别的 statusline 工具**（比如 ccometix、claude-code-statusline-pro），
+脚本会**警告并跳过**，不覆盖你的配置。要兼容,可以让你现有的 statusline 命令在
+最前面调一次 `cc-meta-writer`（它的 stdout 是空字符串，不影响展示）。
+
+`cc-meta-writer` 写入的 `.cc-meta.json` **没有 TTL**——元数据一旦写过就一直有效，
+直到下一次会话事件覆盖。状态信号仍由 hook（`.cc-status.json`）和 JSONL 启发式
+负责，三层独立、字段级 fallback。
+
 ## 安装
 
 ```bash
@@ -90,7 +116,8 @@ claude-code.swiftbar/        # SwiftBar 插件 bundle
 ├── plugin.1s.sh             # 主脚本(每 1s 刷新)
 ├── .Contents/Info.plist     # bundle metadata
 ├── .bin/cc-jump             # 窗口跳转助手(bash 脚本)
-├── .bin/cc-status-writer    # Hook 事件→状态写入器
+├── .bin/cc-status-writer    # Hook 事件→状态写入器(.cc-status.json)
+├── .bin/cc-meta-writer      # statusLine 元数据写入器(.cc-meta.json)
 └── .assets/icons/           # 菜单栏 / 菜单图标(.b64 + .png)
 ```
 
