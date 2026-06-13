@@ -1,19 +1,19 @@
 #!/bin/bash
 # <bitbar.title>Claude Code Status</bitbar.title>
-# <bitbar.version>v2.4</bitbar.version>
+# <bitbar.version>v3.0</bitbar.version>
 # <bitbar.author>PanYing</bitbar.author>
 # <bitbar.author.github>anylain</bitbar.author.github>
 # <bitbar.desc>Realtime Claude Code task/session status with click-to-jump</bitbar.desc>
 # <bitbar.dependencies>bash,python3</bitbar.dependencies>
 # <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
-# <swiftbar.useTrailingStreamSeparator>true</swiftbar.useTrailingStreamSeparator>
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 PROJECTS_DIR="$HOME/.claude/projects"
-# Resource dirs are dot-prefixed so SwiftBar 2.0.1 (no packaged-plugin support yet)
-# skips them during plugin discovery.
-PKG_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Packaged-plugin layout: SwiftBar discovers `plugin.*` as the entry; sibling
+# dirs (.bin, .assets, .Contents) are auxiliary resources inside the bundle.
+# Prefer SwiftBar's authoritative path over $0 self-discovery.
+PKG_DIR="${SWIFTBAR_PLUGIN_PACKAGE_PATH:-$(cd "$(dirname "$0")" && pwd)}"
 JUMP_BIN="$PKG_DIR/.bin/cc-jump"
 ICON_DIR="$PKG_DIR/.assets/icons"
 

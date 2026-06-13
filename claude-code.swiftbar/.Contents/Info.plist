@@ -9,9 +9,9 @@
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleVersion</key>
-    <string>2.4</string>
+    <string>3.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.4</string>
+    <string>3.0</string>
     <key>LSTypeIsPackage</key>
     <true/>
 </dict>
