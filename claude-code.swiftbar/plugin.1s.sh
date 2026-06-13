@@ -45,6 +45,7 @@ CC_APP_B64 = load_icon("cc-app")
 RUNNING_SECS = 30
 IDLE_SECS = 5
 ALIVE_SECS = 120  # jsonl modified within 2 min => session is "alive"
+THINK_GRACE = 180  # alive proc + no child + jsonl silent < THINK_GRACE => still thinking
 HOOK_STATUS_TTL = 60  # hook-written .cc-status.json valid for 60s before fallback to classify
 
 def read_last_entries(path, n=20):
@@ -361,8 +362,7 @@ def classify(entries, mtime, alive_proc, has_active_child):
 
     # 5) Process is alive AND has an active child process — real work in flight
     #    (Bash, Edit, Read, etc.). No time cap needed: the child either exists
-    #    (running) or it doesn't (fall through to idle classification below).
-    #    Replaces the SILENT_RUNNING_MAX heuristic.
+    #    (running) or it doesn't (fall through below).
     if alive_proc and has_active_child and age >= RUNNING_SECS:
         if t == "assistant" and last_kind == "tool_use":
             return ("running", f"working… (last: {last_tool})")
@@ -370,6 +370,15 @@ def classify(entries, mtime, alive_proc, has_active_child):
             return ("running", "compacting / processing…")
         if t == "assistant" and last_kind in ("thinking", "text"):
             return ("running", "thinking / compacting…")
+
+    # 5b) Alive proc, no child, but jsonl silent under THINK_GRACE — assume the
+    #     model is thinking / streaming a long reply with no tool call yet. Without
+    #     this, a long pure-reasoning turn would flip to idle within RUNNING_SECS.
+    if alive_proc and not has_active_child and age < THINK_GRACE:
+        if t == "assistant" and last_kind in ("thinking", "text"):
+            return ("running", "thinking…")
+        if t == "user":
+            return ("running", "Claude is responding…")
 
     if t == "user":
         if age < RUNNING_SECS:
@@ -436,7 +445,12 @@ for proj in sorted(os.listdir(projects_dir)):
     #   (b) a claude process has cwd matching this project (running but idle session,
     #       OR a forgotten/zombie claude — listed so the user can jump in and close it)
     is_recent = (now - mtime) < ALIVE_SECS
-    matched = cwd_map.get(proj_path) if real_cwd else []
+    # claude parent proc doesn't chdir when the user `cd`s in a Bash tool, so its
+    # lsof cwd may still be the session-start dir while meta.workspace.current_dir
+    # has moved to a subdir. Fall back to meta.cwd if proj_path lookup misses.
+    matched = cwd_map.get(proj_path, []) if real_cwd else []
+    if not matched and meta.get("cwd") and meta["cwd"] != proj_path:
+        matched = cwd_map.get(meta["cwd"], [])
     alive = is_recent or bool(matched)
 
     # Aggregate has_active_child across all matched procs (any one with a child = working).

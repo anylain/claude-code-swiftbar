@@ -8,9 +8,10 @@
 #   print an empty string so the plugin doesn't pollute the user's status
 #   line. (Users wanting a real statusline should chain another tool.)
 set -euo pipefail
-command -v python3 >/dev/null 2>&1 || { echo ""; exit 0; }
+[ -x /usr/bin/python3 ] || { echo ""; exit 0; }
 
 tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
 cat > "$tmp"
 /usr/bin/python3 - "$tmp" <<'PY'
 import json, os, sys, time
@@ -50,6 +51,5 @@ try:
 except Exception:
     pass
 PY
-rm -f "$tmp"
 # Empty status line — plugin only uses this hook for metadata side-effect.
 echo ""
