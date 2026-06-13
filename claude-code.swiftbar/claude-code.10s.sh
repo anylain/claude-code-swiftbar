@@ -47,6 +47,14 @@ IDLE_SECS = 5
 ALIVE_SECS = 120  # jsonl modified within 2 min => session is "alive"
 THINK_GRACE = 180  # alive proc + no child + jsonl silent < THINK_GRACE => still thinking
 HOOK_STATUS_TTL = 60  # hook-written .cc-status.json valid for 60s before fallback to classify
+# claude only forks ONE kind of child synchronously when running a tool: a shell
+# for the Bash tool. Every other tool (Read/Edit/Write/Grep/Glob/...) runs in-process.
+# So a "real tool is running" signal = direct child whose comm is the user's shell.
+# Everything else (MCP servers, LSP servers, caffeinate, telemetry watchdogs) is a
+# long-lived helper that may restart mid-session — those must NOT count as "running".
+# Whitelist is more robust than blacklisting helper patterns: LSP servers spawn as
+# bare `node` and would slip through any blacklist.
+TOOL_CHILD_COMMS = {"/bin/zsh", "/bin/bash", "/bin/sh", "zsh", "bash", "sh"}
 
 def read_last_entries(path, n=20):
     try:
@@ -152,6 +160,28 @@ def inspect_claude_procs():
         pids = subprocess.check_output(["pgrep", "-x", "claude"], text=True).split()
     except subprocess.CalledProcessError:
         return procs
+
+    # Snapshot pid → (ppid, comm) for every process in one ps call. We use comm
+    # (kernel-recorded program name) — NOT command/args — to filter non-tool
+    # children: command can contain Bash-tool source code that happens to mention
+    # "mcp"/"caffeinate" and would cause false positives.
+    pid_ppid = {}
+    pid_comm = {}
+    try:
+        snap = subprocess.check_output(
+            ["ps", "-A", "-o", "pid=,ppid=,comm="],
+            text=True, stderr=subprocess.DEVNULL
+        )
+        for line in snap.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) != 3:
+                continue
+            cpid, cppid, comm = parts
+            pid_ppid[cpid] = cppid
+            pid_comm[cpid] = comm
+    except Exception:
+        pass
+
     for pid in pids:
         info = {"pid": pid, "cwd": None, "env": {}, "host": "other", "has_active_child": False}
         try:
@@ -176,16 +206,14 @@ def inspect_claude_procs():
                     info["env"][k] = v
         except Exception:
             pass
-        # Detect active child processes — distinguishes "Claude is running a tool"
-        # from "Claude is waiting on the model". Replaces the old SILENT_RUNNING_MAX cap.
-        try:
-            children = subprocess.check_output(
-                ["pgrep", "-P", pid],
-                text=True, stderr=subprocess.DEVNULL
-            ).strip()
-            info["has_active_child"] = bool(children)
-        except Exception:
-            pass
+        # Detect active *tool* children. claude only forks a shell (Bash tool);
+        # other helpers (MCP/LSP/caffeinate/watchdog) get filtered out.
+        for cpid, cppid in pid_ppid.items():
+            if cppid != pid:
+                continue
+            if pid_comm.get(cpid, "") in TOOL_CHILD_COMMS:
+                info["has_active_child"] = True
+                break
         # Host detection: env vars first, parent chain fallback
         env = info["env"]
         if "ITERM_SESSION_ID" in env:
