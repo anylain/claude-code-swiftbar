@@ -113,7 +113,7 @@ ln -s "$(pwd)/claude-code.swiftbar" \
 
 ```
 claude-code.swiftbar/        # SwiftBar 插件 bundle
-├── plugin.1s.sh             # 主脚本(每 1s 刷新)
+├── plugin.3s.sh             # 主脚本(每 3s 刷新)
 ├── .Contents/Info.plist     # bundle metadata
 ├── .bin/cc-jump             # 窗口跳转助手(bash 脚本)
 ├── .bin/cc-status-writer    # Hook 事件→状态写入器(.cc-status.json)
