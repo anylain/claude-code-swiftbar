@@ -135,6 +135,16 @@ def read_hook_status(pdir):
         pass
     return None, None
 
+def read_meta(pdir):
+    """Read statusLine-written metadata file. No TTL — metadata stays valid
+    until overwritten. Returns dict (possibly empty)."""
+    path = os.path.join(pdir, ".cc-meta.json")
+    try:
+        with open(path) as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
 # Inspect every live claude process: PID, env vars, cwd
 def inspect_claude_procs():
     procs = []
@@ -392,17 +402,23 @@ for proj in sorted(os.listdir(projects_dir)):
     mtime = os.path.getmtime(latest)
     entries = read_last_entries(latest)
 
-    # Real cwd from jsonl content (handles cwd drift after the session started).
+    # Layer 1 (highest priority): statusLine-written .cc-meta.json
+    meta = read_meta(pdir)
+    meta_workspace = meta.get("workspace") or {}
+    meta_cwd = meta_workspace.get("current_dir") or meta.get("cwd") or ""
+
+    # Layer 2: JSONL first-cwd scan (fallback)
     # NOTE: proj dir names encode '/' as '-', so decoding back is inherently lossy
     # when real dir names contain literal dashes (e.g. "claude-code-swiftbar").
     # Always prefer real_cwd from the jsonl; only fall back to the decoded path for
     # display when real_cwd is unavailable. Never use the decoded path for cwd matching.
-    real_cwd = read_first_cwd(latest)
+    real_cwd = meta_cwd or read_first_cwd(latest)
     proj_path_decoded = "/" + proj.lstrip("-").replace("-", "/")
     proj_path = real_cwd or proj_path_decoded
     proj_name = os.path.basename(proj_path) or proj
 
-    # Authoritative host from jsonl entrypoint (set by claude CLI based on launch context)
+    # Authoritative host from jsonl entrypoint (set by claude CLI based on launch context).
+    # statusLine doesn't expose this signal, so we still scan jsonl.
     entrypoint = read_entrypoint(latest)
     host_from_ep = host_from_entrypoint(entrypoint)
 
