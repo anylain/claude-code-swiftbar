@@ -2,7 +2,7 @@
 
 一个 [SwiftBar](https://github.com/swiftbar/SwiftBar) 插件,在 macOS 菜单栏实时显示
 [Claude Code](https://claude.com/claude-code) 会话状态,点击可一键跳回会话所在窗口
-(iTerm 标签页、VS Code、JetBrains 或 Finder)。
+(iTerm 标签页、VS Code、JetBrains)。
 
 ![菜单栏](docs/menubar.png)
 
