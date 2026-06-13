@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>local.swiftbar.claude-code</string>
+    <key>CFBundleName</key>
+    <string>Claude Code Status</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleVersion</key>
+    <string>2.4</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.4</string>
+    <key>LSTypeIsPackage</key>
+    <true/>
+</dict>
+</plist>

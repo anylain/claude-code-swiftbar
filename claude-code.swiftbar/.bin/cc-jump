@@ -1,0 +1,154 @@
+#!/bin/bash
+# cc-jump: 跳到 Claude Code 会话所在的窗口
+# 用法: cc-jump <session-id> <project-cwd>
+# 策略:
+#   1. 从 jsonl 读 entrypoint(cli / claude-vscode / claude-jetbrains)
+#   2. 根据 entrypoint 决定宿主类型,激活对应应用
+#   3. iTerm:在所有 ITERM_SESSION_ID 进程里找 cwd 最匹配的 tty,精准切到该 tab
+
+set -u
+
+SESSION_ID="${1:-}"
+PROJECT_CWD="${2:-}"
+
+if [ -z "$PROJECT_CWD" ]; then
+  echo "usage: cc-jump <session-id> <project-cwd>" >&2
+  exit 2
+fi
+
+IDEA_BIN="$HOME/Library/Application Support/JetBrains/Toolbox/scripts/idea"
+PROJECTS_DIR="$HOME/.claude/projects"
+
+find_jsonl() {
+  local sid="$1"
+  for d in "$PROJECTS_DIR"/*/; do
+    if [ -f "$d$sid.jsonl" ]; then
+      echo "$d$sid.jsonl"
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_entrypoint() {
+  local f="$1"
+  [ -f "$f" ] || return
+  /usr/bin/python3 - "$f" <<'PY' 2>/dev/null
+import sys, json
+with open(sys.argv[1]) as fh:
+    for i, line in enumerate(fh):
+        if i > 200: break
+        try:
+            d = json.loads(line)
+            if d.get("entrypoint"):
+                print(d["entrypoint"]); break
+        except: pass
+PY
+}
+
+host_from_entrypoint() {
+  case "$1" in
+    *vscode*) echo "vscode" ;;
+    *jetbrains*|*intellij*) echo "idea" ;;
+    *) echo "" ;;  # cli/unknown — defer to process inspection
+  esac
+}
+
+cwd_of_pid() {
+  /usr/sbin/lsof -a -p "$1" -d cwd -Fn 2>/dev/null | grep '^n' | head -1 | sed 's/^n//'
+}
+
+env_of() {
+  ps -E -p "$1" -o command= 2>/dev/null
+}
+
+tty_of_pid() {
+  ps -o tty= -p "$1" 2>/dev/null | tr -d ' '
+}
+
+# 沿父进程链识别宿主类型
+host_from_parent() {
+  local p="$1"
+  local seen=0
+  while [ -n "$p" ] && [ "$p" != "1" ] && [ "$p" != "0" ] && [ "$seen" -lt 30 ]; do
+    local comm
+    comm=$(ps -o comm= -p "$p" 2>/dev/null)
+    case "$comm" in
+      *iTerm*|*iTermServer*) echo "iterm"; return 0 ;;
+      *IntelliJ*|*idea*|*pycharm*|*PyCharm*|*WebStorm*|*GoLand*) echo "idea"; return 0 ;;
+      */Code|*"Code Helper"*) echo "vscode"; return 0 ;;
+    esac
+    p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+    seen=$((seen + 1))
+  done
+  echo ""
+}
+
+# 找匹配 cwd 的 claude pid;没找到取唯一一个;否则空
+find_claude_pid() {
+  local target="$1"
+  local pids=( $(pgrep -x claude 2>/dev/null) )
+  for pid in "${pids[@]}"; do
+    if [ "$(cwd_of_pid "$pid")" = "$target" ]; then
+      echo "$pid"
+      return
+    fi
+  done
+  if [ "${#pids[@]}" -eq 1 ]; then
+    echo "${pids[0]}"
+  fi
+}
+
+JSONL=$(find_jsonl "$SESSION_ID")
+EP=""
+[ -n "$JSONL" ] && EP=$(read_entrypoint "$JSONL")
+KIND=$(host_from_entrypoint "$EP")
+
+# 对 cli/未知 entrypoint:用 claude 进程父链识别宿主
+if [ -z "$KIND" ]; then
+  PID=$(find_claude_pid "$PROJECT_CWD")
+  if [ -n "$PID" ]; then
+    KIND=$(host_from_parent "$PID")
+  fi
+fi
+
+case "$KIND" in
+  iterm)
+    PID="${PID:-$(find_claude_pid "$PROJECT_CWD")}"
+    if [ -n "$PID" ]; then
+      TTY=$(tty_of_pid "$PID")
+      TTY_PATH="/dev/$TTY"
+      /usr/bin/osascript <<APPLESCRIPT
+tell application "iTerm2"
+    activate
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if (tty of s) is "$TTY_PATH" then
+                    tell w to select t
+                    select s
+                    return
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell
+APPLESCRIPT
+    else
+      /usr/bin/open -a iTerm
+    fi
+    ;;
+  idea)
+    if [ -x "$IDEA_BIN" ]; then
+      "$IDEA_BIN" "$PROJECT_CWD" >/dev/null 2>&1 &
+    else
+      /usr/bin/open -a "IntelliJ IDEA" "$PROJECT_CWD"
+    fi
+    ;;
+  vscode)
+    /usr/bin/open -a "Visual Studio Code" "$PROJECT_CWD"
+    ;;
+  *)
+    /usr/bin/open "$PROJECT_CWD"
+    ;;
+esac
