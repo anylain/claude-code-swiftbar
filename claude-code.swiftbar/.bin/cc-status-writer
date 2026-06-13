@@ -121,3 +121,24 @@ elif event_name == "PostCompact":
 # Other events are intentionally ignored.
 PY
 rm -f "$tmp"
+
+# ── Trailing-edge debounce: collapse hook bursts into one URL refresh ──────
+# Multiple hooks within 1s share a single trailing worker; only the worker
+# that wins the LOCK race fires `swiftbar://refreshplugin?name=claude-code`.
+# Spec: docs/superpowers/specs/2026-06-14-swiftbar-cpu-perf-design.md
+PENDING="/tmp/cc-swiftbar-pending"
+LOCK="/tmp/cc-swiftbar-lock"
+
+date +%s.%N > "$PENDING" 2>/dev/null || true
+
+if [ -e "$LOCK" ]; then
+  exit 0
+fi
+
+(
+  : > "$LOCK"
+  trap 'rm -f "$LOCK"' EXIT
+  sleep 1
+  rm -f "$PENDING"
+  /usr/bin/open -g "swiftbar://refreshplugin?name=claude-code" 2>/dev/null || true
+) </dev/null >/dev/null 2>&1 &
