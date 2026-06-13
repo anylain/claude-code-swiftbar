@@ -30,13 +30,26 @@ fi
 
 LINK="$PLUGIN_DIR/claude-code.swiftbar"
 
-if [ -L "$LINK" ] || [ -e "$LINK" ]; then
-  echo "Removing existing $LINK"
+# Avoid recreating an already-correct symlink — SwiftBar treats remove+create
+# as plugin uninstall+install and resets the menu bar icon position.
+if [ -L "$LINK" ]; then
+  CURRENT_TARGET="$(readlink "$LINK")"
+  if [ "$CURRENT_TARGET" = "$PLUGIN_SRC" ]; then
+    echo "Symlink already correct: $LINK -> $PLUGIN_SRC (skipping)"
+  else
+    echo "Updating symlink: $LINK -> $PLUGIN_SRC (was: $CURRENT_TARGET)"
+    rm -f "$LINK"
+    ln -s "$PLUGIN_SRC" "$LINK"
+  fi
+elif [ -e "$LINK" ]; then
+  echo "Replacing non-symlink at $LINK"
   rm -rf "$LINK"
+  ln -s "$PLUGIN_SRC" "$LINK"
+  echo "Linked: $LINK -> $PLUGIN_SRC"
+else
+  ln -s "$PLUGIN_SRC" "$LINK"
+  echo "Linked: $LINK -> $PLUGIN_SRC"
 fi
-
-ln -s "$PLUGIN_SRC" "$LINK"
-echo "Linked: $LINK -> $PLUGIN_SRC"
 
 # ── Install Claude Code hooks for event-driven status ──────────────────────
 HOOK_SCRIPT="$LINK/.bin/cc-status-writer"
