@@ -45,7 +45,6 @@ CC_APP_B64 = load_icon("cc-app")
 RUNNING_SECS = 30
 IDLE_SECS = 5
 ALIVE_SECS = 120  # jsonl modified within 2 min => session is "alive"
-SILENT_RUNNING_MAX = 600  # alive_proc + silent jsonl counted as running only up to 10 min
 HOOK_STATUS_TTL = 60  # hook-written .cc-status.json valid for 60s before fallback to classify
 
 def read_last_entries(path, n=20):
@@ -153,7 +152,7 @@ def inspect_claude_procs():
     except subprocess.CalledProcessError:
         return procs
     for pid in pids:
-        info = {"pid": pid, "cwd": None, "env": {}, "host": "other"}
+        info = {"pid": pid, "cwd": None, "env": {}, "host": "other", "has_active_child": False}
         try:
             res = subprocess.check_output(
                 ["/usr/sbin/lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"],
@@ -174,6 +173,16 @@ def inspect_claude_procs():
                 if "=" in tok:
                     k, v = tok.split("=", 1)
                     info["env"][k] = v
+        except Exception:
+            pass
+        # Detect active child processes — distinguishes "Claude is running a tool"
+        # from "Claude is waiting on the model". Replaces the old SILENT_RUNNING_MAX cap.
+        try:
+            children = subprocess.check_output(
+                ["pgrep", "-P", pid],
+                text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            info["has_active_child"] = bool(children)
         except Exception:
             pass
         # Host detection: env vars first, parent chain fallback
@@ -220,7 +229,7 @@ def host_from_parent(pid):
         seen += 1
     return "other"
 
-def classify(entries, mtime, alive_proc):
+def classify(entries, mtime, alive_proc, has_active_child):
     if not entries:
         return ("unknown", "empty")
 
@@ -350,11 +359,11 @@ def classify(entries, mtime, alive_proc):
     if last_error is not None and last_error_pos >= len(entries) - 3 and age >= IDLE_SECS:
         return ("error", f"tool failed: {last_error[:80]}")
 
-    # 5) Process is alive but jsonl has been silent — Claude is doing internal work
-    #    (compacting context, long thinking turn, network call). Show as running,
-    #    but cap how long we maintain that fiction — beyond SILENT_RUNNING_MAX it's
-    #    more likely a zombie / drifted shell with no actual work in flight.
-    if alive_proc and RUNNING_SECS <= age < SILENT_RUNNING_MAX:
+    # 5) Process is alive AND has an active child process — real work in flight
+    #    (Bash, Edit, Read, etc.). No time cap needed: the child either exists
+    #    (running) or it doesn't (fall through to idle classification below).
+    #    Replaces the SILENT_RUNNING_MAX heuristic.
+    if alive_proc and has_active_child and age >= RUNNING_SECS:
         if t == "assistant" and last_kind == "tool_use":
             return ("running", f"working… (last: {last_tool})")
         if t == "user":
@@ -430,6 +439,9 @@ for proj in sorted(os.listdir(projects_dir)):
     matched = cwd_map.get(proj_path) if real_cwd else []
     alive = is_recent or bool(matched)
 
+    # Aggregate has_active_child across all matched procs (any one with a child = working).
+    has_child = any(p.get("has_active_child") for p in (matched or []))
+
     # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
     # Falls back to JSONL-based classify() for sessions without hooks configured.
     hook_state, hook_detail = read_hook_status(pdir)
@@ -437,7 +449,7 @@ for proj in sorted(os.listdir(projects_dir)):
         state, detail = hook_state, hook_detail
         alive = True  # hook only fires for live sessions
     else:
-        state, detail = classify(entries, mtime, alive_proc=alive)
+        state, detail = classify(entries, mtime, alive_proc=alive, has_active_child=has_child)
     if alive:
         if host_from_ep:
             host = host_from_ep
