@@ -30,7 +30,7 @@ cat > "$tmp"
 # issue. /tmp/cc-hook-stop-debug.log is appended (one JSON per line).
 # Opt-in: only runs if CC_STATUS_HISTORY=1 or /tmp/cc-status-history.enabled exists.
 if [ "${CC_STATUS_HISTORY:-}" = "1" ] || [ -e /tmp/cc-status-history.enabled ]; then
-  if /usr/bin/python3 "$LIB_DIR/is_stop_event.py" "$tmp" 2>/dev/null; then
+  if /usr/bin/python3 -S "$LIB_DIR/is_stop_event.py" "$tmp" 2>/dev/null; then
     {
       /bin/date '+%s %FT%T'
       cat "$tmp"
@@ -39,7 +39,7 @@ if [ "${CC_STATUS_HISTORY:-}" = "1" ] || [ -e /tmp/cc-status-history.enabled ]; 
   fi
 fi
 
-/usr/bin/python3 "$LIB_DIR/write_status.py" "$tmp" "$HOME"
+/usr/bin/python3 -S "$LIB_DIR/write_status.py" "$tmp" "$HOME"
 rm -f "$tmp"
 
 # ── SwiftBar refresh: debounced by default ────────────────────────────────
@@ -82,7 +82,7 @@ else
   # all future refreshes until reboot.
   LOCK="/tmp/cc-swiftbar-lock-$UID"
   if [ -e "$LOCK" ]; then
-    if /usr/bin/python3 -c "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('$LOCK') > 5 else 1)" 2>/dev/null; then
+    if /usr/bin/python3 -S -c "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('$LOCK') > 5 else 1)" 2>/dev/null; then
       rm -f "$LOCK"
     else
       exit 0

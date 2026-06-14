@@ -21,7 +21,7 @@ LIB_DIR="$(cd "$BIN_DIR/../.lib" && pwd)"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"; echo ""; exit 0' EXIT
 cat > "$tmp"
-/usr/bin/python3 "$LIB_DIR/write_meta.py" "$tmp"
+/usr/bin/python3 -S "$LIB_DIR/write_meta.py" "$tmp"
 # Empty status line — plugin only uses this hook for metadata side-effect.
 echo ""
 exit 0

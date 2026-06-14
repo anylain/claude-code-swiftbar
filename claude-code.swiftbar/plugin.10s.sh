@@ -18,4 +18,4 @@ JUMP_BIN="$PKG_DIR/.bin/cc-jump"
 ICON_DIR="$PKG_DIR/.assets/icons"
 RENDER_PY="$PKG_DIR/.lib/render_menu.py"
 
-exec /usr/bin/python3 "$RENDER_PY" "$PROJECTS_DIR" "$JUMP_BIN" "$ICON_DIR"
+exec /usr/bin/python3 -S "$RENDER_PY" "$PROJECTS_DIR" "$JUMP_BIN" "$ICON_DIR"

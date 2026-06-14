@@ -33,7 +33,7 @@ find_jsonl() {
 read_entrypoint() {
   local f="$1"
   [ -f "$f" ] || return
-  /usr/bin/python3 - "$f" <<'PY' 2>/dev/null
+  /usr/bin/python3 -S - "$f" <<'PY' 2>/dev/null
 import sys, json
 with open(sys.argv[1]) as fh:
     for i, line in enumerate(fh):
