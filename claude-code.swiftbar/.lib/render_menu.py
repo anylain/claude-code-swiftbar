@@ -25,6 +25,12 @@ def load_icon(name):
 
 CC_APP_B64 = load_icon("cc-app")
 
+HOST_TAG = {
+    "iterm": "  [iTerm]",
+    "vscode": "  [VSCode]",
+    "idea": "  [IDEA]",
+}
+
 RUNNING_SECS = 30
 IDLE_SECS = 5
 ALIVE_SECS = 120  # jsonl modified within 2 min => session is "alive"
@@ -858,7 +864,8 @@ else:
         params = f"bash='{jump_bin}' param1='{s['session']}' param2='{s['proj_path']}' terminal=false"
         if dim:
             params = "color=gray " + params
-        line = f"{icon} {s['proj']}  ({fmt_age(s['age'])} ago)"
+        host_tag = HOST_TAG.get(s["host"] if s["alive"] else "other", "")
+        line = f"{icon} {s['proj']}{host_tag}  ({fmt_age(s['age'])} ago)"
         print(f"{line} | {params}")
         detail = (s["detail"] or "").replace("|", "/").replace("\n", " ")
         if len(detail) > 90:
