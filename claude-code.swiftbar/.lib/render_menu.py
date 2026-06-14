@@ -599,8 +599,10 @@ for proj in sorted(os.listdir(projects_dir)):
     proj_name = os.path.basename(proj_path) or proj
 
     # Authoritative host from jsonl entrypoint (set by claude CLI based on launch context).
-    # statusLine doesn't expose this signal, so we still scan jsonl.
-    entrypoint = read_entrypoint(files_latest)
+    # write_meta.py caches it on first session statusLine; we only re-scan jsonl
+    # when meta has no entrypoint (e.g. very old meta written before this field
+    # existed, or sessions whose statusLine never fired).
+    entrypoint = meta.get("entrypoint") or read_entrypoint(files_latest)
     host_from_ep = host_from_entrypoint(entrypoint)
 
     # Alive judgement happens in a 2nd pass below. Here we just stage the

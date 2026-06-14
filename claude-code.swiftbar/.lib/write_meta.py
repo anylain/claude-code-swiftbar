@@ -25,6 +25,41 @@ if not os.path.isdir(proj_dir):
 
 meta_file = os.path.join(proj_dir, ".cc-meta.json")
 
+
+# Read prior meta to preserve cached entrypoint (it never changes mid-session,
+# so we read jsonl at most once per session and let it ride forever after).
+prior_entrypoint = ""
+try:
+    with open(meta_file) as f:
+        prior = json.load(f) or {}
+        prior_entrypoint = prior.get("entrypoint", "") or ""
+except Exception:
+    pass
+
+
+def extract_entrypoint(jsonl_path):
+    """Scan jsonl head for 'entrypoint' — set by claude CLI based on launch
+    context (cli / claude-vscode / claude-jetbrains). Caching this in meta
+    saves the plugin a 200-line jsonl head read on every refresh."""
+    try:
+        with open(jsonl_path) as fh:
+            for _ in range(200):
+                line = fh.readline()
+                if not line:
+                    break
+                try:
+                    d = json.loads(line)
+                    if d.get("entrypoint"):
+                        return d["entrypoint"]
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return ""
+
+
+entrypoint = prior_entrypoint or extract_entrypoint(transcript_path)
+
 payload = {
     "session_id": event.get("session_id", ""),
     "transcript_path": transcript_path,
@@ -33,6 +68,7 @@ payload = {
     "model": event.get("model", {}),
     "version": event.get("version", ""),
     "output_style": event.get("output_style", {}),
+    "entrypoint": entrypoint,
     "last_seen": int(time.time()),
 }
 
