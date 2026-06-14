@@ -327,7 +327,22 @@ def classify(entries, mtime, alive_proc, has_active_child):
     t = last.get("type")
     msg = last.get("message", {}) or {}
     content = msg.get("content")
-    age = now - mtime
+
+    # `age` should reflect time since the last *conversation* turn, not since
+    # any jsonl write. Claude Code occasionally appends system/keepalive entries
+    # to jsonl while the session sits idle (e.g. ~3 min after end_turn), which
+    # would otherwise reset the file mtime and make a needs-input session look
+    # like fresh activity → misclassified as "thinking…" running. Prefer the
+    # last user/assistant entry's own timestamp; fall back to mtime if missing.
+    last_ts_raw = last.get("timestamp")
+    last_ts = None
+    if isinstance(last_ts_raw, str):
+        try:
+            from datetime import datetime, timezone
+            last_ts = datetime.fromisoformat(last_ts_raw.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            last_ts = None
+    age = now - (last_ts if last_ts is not None else mtime)
 
     last_kind = None
     last_tool = None
