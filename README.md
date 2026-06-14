@@ -38,32 +38,24 @@
 
 不需要 Homebrew 或其他额外依赖。
 
-## Hook（可选，大幅提升状态准确度）
+## Hook（自动配置，大幅提升状态准确度）
 
 插件默认通过解析 JSONL 推断状态，有 10s 轮询延迟且依赖启发式规则。
 启用 Claude Code hooks 后，状态变为**事件驱动**，~1s 内响应，准确度大幅提升。
 
-只需在 `~/.claude/settings.json` 中加入：
+`install.sh` 已经会幂等地把 10 个 hook 事件
+（`UserPromptSubmit` / `PreToolUse` / `PostToolBatch` / `Stop` / `StopFailure` /
+`PermissionRequest` / `PreCompact` / `PostCompact` / `SessionStart` / `SessionEnd`）
+写入 `~/.claude/settings.json`，命令形如：
 
 ```json
-{
-  "hooks": {
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "PreToolUse":       [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "PostToolBatch":    [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "Stop":             [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "StopFailure":      [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "PermissionRequest":[{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "PreCompact":       [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "PostCompact":      [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "SessionStart":     [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}],
-    "SessionEnd":       [{"hooks": [{"type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.bin/cc-status-writer\""}]}]
-  }
-}
+{ "type": "command", "command": "bash \"<plugin-bundle>/.bin/cc-status-writer\"" }
 ```
 
-**注意**：`$CLAUDE_PROJECT_DIR` 指向插件 bundle 根目录（即 `claude-code.swiftbar/`），
-hook 脚本位于 `.bin/cc-status-writer`。如果你把插件装在其他位置，请相应调整路径。
+`<plugin-bundle>` 是软链路径 `~/Library/.../SwiftBar/Plugins/claude-code.swiftbar`
+（具体由 `defaults read com.ameba.SwiftBar PluginDirectory` 决定）。
+**不要把命令里的绝对路径替换成 `$CLAUDE_PROJECT_DIR`** —— 那个变量指向的是用户
+当前会话的项目目录，不是插件 bundle。
 
 Hook 写入的状态文件（`.cc-status.json`）有效期为 60 秒，超时后插件
 自动回退到 JSONL 解析方式，确保未配置 hook 的项目也正常工作。
@@ -135,6 +127,9 @@ cd claude-code-swiftbar
 ln -s "$(pwd)/claude-code.swiftbar" \
       "$(defaults read com.ameba.SwiftBar PluginDirectory)/claude-code.swiftbar"
 ```
+
+仅软链不会注册 hook 与 statusLine —— 状态会回退到 10s 轮询的 JSONL 启发式，
+也不会捕获 `cd` 后的 cwd / model 元数据。要拿到完整体验，请跑 `./install.sh`。
 
 ## 仓库结构
 

@@ -70,20 +70,22 @@ Hook 事件成簇出现（PreToolUse + PostToolBatch + Stop 等）。writer 用 
 
 参考 [SwiftBar 官方 README](https://github.com/swiftbar/SwiftBar) 和源码（`SwiftBar/Utility/Environment.swift`、`SwiftBar/Plugin/PackagedPlugin.swift`）。
 
-### SwiftBar 提供的环境变量（脚本可用但当前未用）
+### SwiftBar 提供的环境变量
 
-- `SWIFTBAR_PLUGIN_PATH` —— 当前运行的脚本绝对路径。可替代 `claude-code.10s.sh` 里的 `PKG_DIR="$(cd "$(dirname "$0")" && pwd)"`。
+已用：
+
+- `SWIFTBAR_PLUGIN_PACKAGE_PATH` —— 仅 packaged plugin 模式下设置，指向 bundle 根。`plugin.10s.sh` 用它给 `PKG_DIR` 赋值，fallback 才走 `$0` 推断。
+
+未用但可考虑：
+
 - `SWIFTBAR_PLUGIN_REFRESH_REASON` —— 本次刷新的触发原因（如 `Schedule`、`FirstLaunch`、用户点击）。可用来在 URL 主动刷新时跳过部分扫描，省 CPU。
 - `SWIFTBAR_PLUGIN_DATA_PATH` / `SWIFTBAR_PLUGIN_CACHE_PATH` —— SwiftBar 为每个插件分配的私有数据/缓存目录。如果未来要持久化跨次刷新的状态（比如缓存进程列表），用这两个比 `/tmp` 更规范。
-- `SWIFTBAR_PLUGIN_PACKAGE_PATH` —— 仅在 packaged plugin 模式下设置（见上面 Bundle 布局段）。
 - `OS_APPEARANCE` —— `Light` / `Dark`。当前菜单栏图标用的是固定 b64 PNG，深色模式下可能不够清晰；可以改用 SwiftBar 的 `templateImage=` 参数让系统自动适配，或按 `OS_APPEARANCE` 切两套 b64。
 
-### 用过但要点更新
+### 元数据约定
 
-- `# <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>` —— 用户点开下拉菜单时立刻刷新一次，已启用，行为正确。
-- `# <swiftbar.useTrailingStreamSeparator>true</swiftbar.useTrailingStreamSeparator>` —— **死代码**。该 metadata 只对 `<swiftbar.type>streamable</swiftbar.type>` 生效，我们不是 streamable plugin。可以删除。
-- 单行 `param` 值：当前长 `detail` 在 Python 里手动截到 90 字符并补 `…`。SwiftBar 自带 `length=N tooltip=...` 参数：截断 + 悬停看全文。下次重写菜单输出可以替换成原生支持。
-- `# <bitbar.*>` 元数据 —— 与 `xbar.*` / `swiftbar.*` 三种前缀同义，SwiftBar 都接受。脚本头部混用 `bitbar` 和 `swiftbar`，没问题，无需统一。
+- `# <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>` —— 用户点开下拉菜单时立刻刷新一次，已启用。
+- `# <bitbar.*>` 元数据 —— 与 `xbar.*` / `swiftbar.*` 三种前缀同义，SwiftBar 都接受。脚本头部混用 `bitbar` 和 `swiftbar`，无需统一。
 
 ## 设计文档
 
