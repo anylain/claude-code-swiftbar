@@ -116,7 +116,16 @@ def main():
     subtitle = f"{emoji} {action}"
     body = (detail or "").strip()[:200]
 
-    _fire_notification(title, subtitle, body)
+    # claude-code-swiftbar://jump?sid=…&cwd=… — handled by .bin/CCJump.app,
+    # registered with LaunchServices by install.sh. Falls through silently if
+    # the .app isn't built (notification still appears, just no click-to-jump).
+    # The scheme name is intentionally project-namespaced to avoid colliding
+    # with anything else that might claim "cc-jump://" or similar shorthand.
+    from urllib.parse import urlencode as _urlencode
+    href_cwd = cwd or proj_dir
+    href = "claude-code-swiftbar://jump?" + _urlencode({"sid": sid, "cwd": href_cwd})
+
+    _fire_notification(title, subtitle, body, href)
 
 
 def _host_from_transcript(jsonl_path):
@@ -218,8 +227,8 @@ def _is_host_foreground(host, proj_dir):
     return False
 
 
-def _fire_notification(title, subtitle, body):
-    # SwiftBar URL scheme: swiftbar://notify?plugin=<name>&title=&subtitle=&body=
+def _fire_notification(title, subtitle, body, href):
+    # SwiftBar URL scheme: swiftbar://notify?plugin=<name>&title=&subtitle=&body=&href=
     # We fire the same dual-name pair as cc-status-writer's refresh URL so it
     # works on both v2.0.1 and post-packaged-plugin SwiftBar.
     from urllib.parse import urlencode
@@ -228,6 +237,7 @@ def _fire_notification(title, subtitle, body):
         "title": title,
         "subtitle": subtitle,
         "body": body,
+        "href": href,
     }
     for plugin_name in ("plugin.10s.sh", "claude-code"):
         params = dict(base_params, plugin=plugin_name)

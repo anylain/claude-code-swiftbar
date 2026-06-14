@@ -97,6 +97,16 @@ Hook 事件成簇出现（PreToolUse + PostToolBatch + Stop 等）。writer 用 
 
 **配置链路**:`plugin.10s.sh` 头部声明 `<swiftbar.environment>[CC_NOTIFY=1]</swiftbar.environment>`,在支持该元数据 UI 的 SwiftBar 版本里会渲染成 Preferences 输入框。SwiftBar 把用户选项 inject 进 plugin 主进程的 env,但 Claude Code hook 子进程**不继承** —— 所以 plugin.10s.sh 启动时把当前 `CC_NOTIFY` 值落盘到 `~/.claude/.cc-config.env`,`cc-status-writer` 在脚本头 `source` 它。**v2.0.1 (2026-06 当前发布版) 对 packaged plugin 不渲染该 UI**,所以中转文件**只在不存在时初始化**,不每次覆写 —— 用户直接 `echo 'CC_NOTIFY=0' > ~/.claude/.cc-config.env` 改完不会被插件刷新冲掉。
 
+### 点击通知跳转（CCJump.app）
+
+通知带 `href=claude-code-swiftbar://jump?sid=<sid>&cwd=<encoded-cwd>`,SwiftBar 把它喂给 `/usr/bin/open`,LaunchServices 路由到 `claude-code.swiftbar/.bin/CCJump.app`,后者再调同目录下的 `cc-jump` 脚本(已有的菜单点击命令)跳到对应窗口/tab。
+
+为什么必须打 .app:macOS 只把自定义 URL scheme 的 GURL Apple Event 送给 LaunchServices 注册的 .app(要求 `Info.plist` 里有 `CFBundleURLTypes`)。裸 shell 脚本收不到事件。所以用 `osacompile` 把 `.lib/cc-jump-url/CCJump.applescript` 编成 applet bundle,`build-CCJump.sh` 再用 `defaults write` 注入 `CFBundleURLTypes` + `LSUIElement=true`,然后 `codesign --force --sign -` ad-hoc 重签(plist 改动后旧签名失效),最后 `lsregister -f` 显式注册避开 LaunchServices 自动发现的 0–1 分钟空窗。
+
+`.app` 是构建产物,`.gitignore` 排除 `claude-code.swiftbar/.bin/CCJump.app/`,源 `CCJump.applescript` 入库。`install.sh` 在 symlink 创建之后、hook 注册之前调用 `build-CCJump.sh`,失败仅打 warning(通知仍弹,只是点击不跳转)。
+
+scheme 名 `claude-code-swiftbar://` 与项目同名故意做长,避免和别的工具撞车;如果改名,要同步改 4 处:`maybe_notify.py` 的 `_fire_notification` href、`build-CCJump.sh` 的 `CFBundleURLSchemes`、`CCJump.applescript` 的注释、`install.sh` 的 echo 文案。
+
 ## 值得记住的约束
 
 - **仅 macOS。** 用了 `lsof`、`osascript`、`defaults`、`ps -A` / `ps -E`、`/usr/bin/python3`，无跨平台需求。

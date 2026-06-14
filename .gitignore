@@ -4,3 +4,6 @@
 .vscode/
 __pycache__/
 *.pyc
+# CCJump.app is a per-machine build product (osacompile output, codesigned
+# locally) — install.sh regenerates it from .lib/cc-jump-url/CCJump.applescript.
+claude-code.swiftbar/.bin/CCJump.app/

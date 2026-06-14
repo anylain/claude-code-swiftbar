@@ -71,6 +71,19 @@ else
   done
 fi
 
+# ── Build the claude-code-swiftbar:// URL handler ─────────────────────────
+# Compiles .lib/cc-jump-url/CCJump.applescript into .bin/CCJump.app and
+# registers it with LaunchServices, so notifications can use
+# href=claude-code-swiftbar://… to bring the user back to the right
+# window/tab on click. Best-effort — failures are warnings, not fatal
+# (notifications still appear, just no click-to-jump).
+BUILD_CCJUMP="$LINK/.lib/cc-jump-url/build-CCJump.sh"
+if [ -x "$BUILD_CCJUMP" ]; then
+  echo
+  echo "Building claude-code-swiftbar:// URL handler..."
+  bash "$BUILD_CCJUMP" || echo "  (warning: build failed; click-to-jump will be unavailable)"
+fi
+
 # ── Install Claude Code hooks for event-driven status ──────────────────────
 HOOK_SCRIPT="$LINK/.bin/cc-status-writer"
 SETTINGS_FILE="$HOME/.claude/settings.json"

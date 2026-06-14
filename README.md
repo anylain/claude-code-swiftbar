@@ -52,6 +52,7 @@ statusLine 钩子(`cc-meta-writer`)让会话内 `cd` 切目录后,菜单栏 1-2 
 会话出现 🔐 等待授权 / ✋ 等待决策时,如果当前**前台窗口不是该会话所在的窗口**,系统通知中心会弹一条提示;前台正在该窗口则静默(避免重复打扰)。
 
 - iTerm 还会精确判断当前 tab 的 cwd —— 别的项目 tab 在前台不算"看到了"。
+- **点击通知跳转**:点一下通知会带你回到该会话所在的窗口/tab(iTerm 精确到 tab,VSCode/JetBrains 切到对应窗口)。靠 `install.sh` 注册的 `claude-code-swiftbar://` URL handler 实现。
 - 关闭/打开:`echo 'CC_NOTIFY=0' > ~/.claude/.cc-config.env`(关),`CC_NOTIFY=1` 打开。SwiftBar 较新版本支持在插件 Preferences 里改环境变量,v2.0.1 不支持,只能直接编辑这个文件。
 - 第一次弹通知时 macOS 会问要不要授权,允许 SwiftBar 即可。
 
