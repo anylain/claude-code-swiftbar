@@ -392,8 +392,6 @@ def classify(entries, mtime, alive_proc, has_active_child):
     last_ts = None
     if isinstance(last_ts_raw, str):
         try:
-            from datetime import datetime
-
             last_ts = datetime.fromisoformat(last_ts_raw.replace("Z", "+00:00")).timestamp()
         except Exception:
             last_ts = None
@@ -848,7 +846,7 @@ else:
     def fmt_age(sec):
         sec = int(sec)
         if sec < 60:
-            return f"{sec}s"
+            return "<1m"
         if sec < 3600:
             return f"{sec // 60}m"
         if sec < 86400:
@@ -875,4 +873,3 @@ else:
 
 print("---")
 print("Refresh | refresh=true")
-print(f"Updated {datetime.now().strftime('%H:%M:%S')} | color=gray")
