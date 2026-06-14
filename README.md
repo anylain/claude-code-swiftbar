@@ -47,6 +47,14 @@ statusLine 钩子(`cc-meta-writer`)让会话内 `cd` 切目录后,菜单栏 1-2 
 
 **已经装了别的 statusline 工具**(ccometix、claude-code-statusline-pro 等):脚本会警告并跳过,不覆盖你的配置。要兼容,在你现有的 statusline 命令最前面调一次 `cc-meta-writer`(它的 stdout 是空字符串,不影响展示)。
 
+## 通知泡
+
+会话出现 🔐 等待授权 / ✋ 等待决策时,如果当前**前台窗口不是该会话所在的窗口**,系统通知中心会弹一条提示;前台正在该窗口则静默(避免重复打扰)。
+
+- iTerm 还会精确判断当前 tab 的 cwd —— 别的项目 tab 在前台不算"看到了"。
+- 关闭:在 SwiftBar 菜单栏图标右键 → Preferences,把 `CC_NOTIFY` 改成 `0`,或在 shell 里 `echo 'CC_NOTIFY=0' > ~/.claude/.cc-config.env`。
+- 第一次弹通知时 macOS 会问要不要授权,允许 SwiftBar 即可。
+
 ## 从 v2.x 升级到 v3.x
 
 v3 把入口脚本从 `claude-code.10s.sh` 改名为 `plugin.10s.sh`,转为 SwiftBar 标准的 packaged plugin 形式。`git pull` + 重跑 `./install.sh` + **重启 SwiftBar**(`killall SwiftBar && open -a SwiftBar`,Refresh All 不够 —— 它只重跑已注册的脚本路径,不重新发现 bundle 入口)。

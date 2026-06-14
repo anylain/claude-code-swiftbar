@@ -13,6 +13,13 @@ set -uo pipefail
 trap 'exit 0' ERR
 command -v python3 >/dev/null 2>&1 || exit 0
 
+# Source user-tunable env relayed by plugin.10s.sh (SwiftBar Preferences UI
+# writes the user's CC_NOTIFY choice into the running plugin's env, which
+# the plugin in turn writes here for hooks). Best-effort: missing file or
+# parse error → fall back to defaults.
+[ -r "$HOME/.claude/.cc-config.env" ] && . "$HOME/.claude/.cc-config.env" 2>/dev/null
+export CC_NOTIFY="${CC_NOTIFY:-1}"
+
 # Locate sibling .lib/ via this script's own path. Hook context doesn't set
 # SWIFTBAR_PLUGIN_PACKAGE_PATH, and the script may be invoked through a
 # symlink (install.sh symlinks the bundle into SwiftBar's plugin folder), so
@@ -40,6 +47,14 @@ if [ "${CC_STATUS_HISTORY:-}" = "1" ] || [ -e /tmp/cc-status-history.enabled ]; 
 fi
 
 /usr/bin/python3 -S "$LIB_DIR/write_status.py" "$tmp" "$HOME"
+
+# ── Notification hook (best-effort) ───────────────────────────────────────
+# After the status file is written, decide whether to fire a macOS notification
+# (only for needs-permission / needs-decision, only when the host window isn't
+# focused). maybe_notify.py reads $tmp + .cc-status.json itself. Disable with
+# CC_NOTIFY=0.
+/usr/bin/python3 -S "$LIB_DIR/maybe_notify.py" "$tmp" >/dev/null 2>&1 || true
+
 rm -f "$tmp"
 
 # ── SwiftBar refresh: debounced by default ────────────────────────────────
