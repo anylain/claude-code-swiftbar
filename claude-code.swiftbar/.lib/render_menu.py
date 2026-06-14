@@ -630,34 +630,26 @@ def classify(entries, mtime, alive_proc, has_active_child):
     return ("unknown", t or "?")
 
 
-procs = inspect_claude_procs()
-
-# Build cwd → procs and host pool
-cwd_map = {}
-for p in procs:
-    if p["cwd"]:
-        cwd_map.setdefault(p["cwd"], []).append(p)
-
-# Pre-compute the set of proj-dir basenames that any live claude proc COULD
-# belong to. Used as a fast-skip check below — if a project's mtime is stale
-# AND no proc cwd encodes to its dir name AND it has no fresh hook status,
-# we can skip the expensive jsonl/meta/entrypoint reads entirely.
-# Encoding: claude stores `/Users/x/foo` as proj-dir `-Users-x-foo`.
-proc_proj_keys = set()
-for cwd in cwd_map:
-    if cwd.startswith("/"):
-        proc_proj_keys.add(cwd.replace("/", "-"))
-
-
-sessions = []
+# PASS 1: cheap project pre-scan. Stat each project dir's *.jsonl mtimes and
+# look for the .cc-status.json sentinel. Skip projects that are clearly dead
+# (stale jsonl + no hook file) before paying any sub-process cost.
+#
+# inspect_claude_procs() costs ~96ms (3 sub-process spawns: ps -A, lsof, ps -E)
+# and dominates the refresh CPU budget. If this pre-scan finds zero potentially
+# active projects, we skip it entirely; drift fallback also degrades gracefully
+# (no procs → no drift assignments, identical to the "all sessions matched"
+# happy path).
+#
+# Trade-off: a freshly-launched claude that has not yet written any jsonl
+# would not show up for one refresh cycle. The very next 10s tick picks it up
+# once the first jsonl line lands.
+prescan = []  # (proj, pdir, latest_path, latest_mtime, has_status_file, is_recent)
+any_live_signal = False
 for proj in sorted(os.listdir(projects_dir)):
     pdir = os.path.join(projects_dir, proj)
     if not os.path.isdir(pdir):
         continue
 
-    # FAST PATH: scan the dir once with scandir so we don't pay 488 separate
-    # stat calls. Find the newest *.jsonl mtime AND check for the .cc-status.json
-    # sentinel in a single pass.
     latest_path = None
     latest_mtime = 0.0
     has_status_file = False
@@ -679,10 +671,35 @@ for proj in sorted(os.listdir(projects_dir)):
     if latest_path is None:
         continue
 
-    # Cheap dead-project skip: stale jsonl + no hook sentinel + no claude proc
-    # plausibly rooted here. Saves read_last_entries/read_meta/read_entrypoint
-    # for ~80% of historical projects on a busy machine.
     is_recent = (now - latest_mtime) < ALIVE_SECS
+    if is_recent or has_status_file:
+        any_live_signal = True
+    prescan.append((proj, pdir, latest_path, latest_mtime, has_status_file, is_recent))
+
+# PASS 2: only inspect procs if at least one project has a live signal.
+# Otherwise procs/cwd_map stay empty and the rest of the pipeline naturally
+# renders "No active sessions" without paying the 96ms.
+if any_live_signal:
+    procs = inspect_claude_procs()
+else:
+    procs = []
+
+cwd_map = {}
+for p in procs:
+    if p["cwd"]:
+        cwd_map.setdefault(p["cwd"], []).append(p)
+
+# Encoding: claude stores `/Users/x/foo` as proj-dir `-Users-x-foo`.
+proc_proj_keys = set()
+for cwd in cwd_map:
+    if cwd.startswith("/"):
+        proc_proj_keys.add(cwd.replace("/", "-"))
+
+
+sessions = []
+for proj, pdir, latest_path, latest_mtime, has_status_file, is_recent in prescan:
+    # Final dead-project skip: stale jsonl + no hook sentinel + no claude proc
+    # plausibly rooted here.
     proc_could_match = proj in proc_proj_keys
     if not is_recent and not has_status_file and not proc_could_match:
         continue
