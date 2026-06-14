@@ -95,7 +95,7 @@ Hook 事件成簇出现（PreToolUse + PostToolBatch + Stop 等）。writer 用 
 3. `.cc-notify-last` 里记录的上次 `(sid, state)` 与当前不同(去簇内重复)
 4. 宿主前台检测返回 false:iTerm 要求当前 tab 的 `session.path` 以 `proj_dir` 开头;VSCode/JetBrains 仅 frontmost 检测(没稳定 AS API 拿当前项目)。osascript 0.6s timeout → 视作非前台,仍弹。
 
-**配置链路**:`plugin.10s.sh` 头部声明 `<swiftbar.environment>[CC_NOTIFY=1]</swiftbar.environment>`,SwiftBar Preferences UI 据此渲染开关。SwiftBar 把用户选项 inject 进 plugin 主进程的 env,但 Claude Code hook 子进程**不继承** —— 所以 plugin.10s.sh 启动时把 `CC_NOTIFY` 的值落盘到 `~/.claude/.cc-config.env`,`cc-status-writer` 在脚本头 `source` 它。中转文件由 plugin 自己重写,不要手改。
+**配置链路**:`plugin.10s.sh` 头部声明 `<swiftbar.environment>[CC_NOTIFY=1]</swiftbar.environment>`,在支持该元数据 UI 的 SwiftBar 版本里会渲染成 Preferences 输入框。SwiftBar 把用户选项 inject 进 plugin 主进程的 env,但 Claude Code hook 子进程**不继承** —— 所以 plugin.10s.sh 启动时把当前 `CC_NOTIFY` 值落盘到 `~/.claude/.cc-config.env`,`cc-status-writer` 在脚本头 `source` 它。**v2.0.1 (2026-06 当前发布版) 对 packaged plugin 不渲染该 UI**,所以中转文件**只在不存在时初始化**,不每次覆写 —— 用户直接 `echo 'CC_NOTIFY=0' > ~/.claude/.cc-config.env` 改完不会被插件刷新冲掉。
 
 ## 值得记住的约束
 
