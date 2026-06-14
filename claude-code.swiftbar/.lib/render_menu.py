@@ -726,7 +726,20 @@ for proj in sorted(os.listdir(projects_dir)):
     # belongs to a *different* session whose project_dir happens to equal this
     # session's current_dir (e.g. parent-dir session at /Users/x/git would
     # otherwise steal the proc of a child session at /Users/x/git/foo).
+    #
+    # Multiple claude procs can share the same project_dir (e.g. same project
+    # opened in iTerm and VSCode at once). Sort candidates so the one whose
+    # CLAUDE_CODE_ENTRYPOINT env matches this session's recorded entrypoint
+    # comes first. CLI-launched procs have no CLAUDE_CODE_ENTRYPOINT in env,
+    # so for entrypoint=="cli" we prefer procs with the var unset.
     candidate_matched = cwd_map.get(proj_path, []) if real_cwd else []
+    if len(candidate_matched) > 1 and entrypoint:
+        def _ep_match_score(p):
+            proc_ep = p.get("env", {}).get("CLAUDE_CODE_ENTRYPOINT", "")
+            if entrypoint == "cli":
+                return 0 if proc_ep == "" else 1
+            return 0 if proc_ep == entrypoint else 1
+        candidate_matched = sorted(candidate_matched, key=_ep_match_score)
 
     # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
     hook_state, hook_detail = read_hook_status(pdir)
