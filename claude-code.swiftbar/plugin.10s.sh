@@ -479,14 +479,19 @@ for proj in sorted(os.listdir(projects_dir)):
     # Layer 1 (highest priority): statusLine-written .cc-meta.json
     meta = read_meta(pdir)
     meta_workspace = meta.get("workspace") or {}
-    meta_cwd = meta_workspace.get("current_dir") or meta.get("cwd") or ""
+    # project_dir is the session's launch root — stable across `cd` inside the
+    # session. Use it for display name AND process matching: the claude parent
+    # proc never chdir's, so its lsof cwd stays at project_dir even after the
+    # user `cd`s into a subdir via the Bash tool. Falling back to meta.cwd
+    # covers older meta files written before project_dir was tracked.
+    meta_project_dir = meta_workspace.get("project_dir") or meta.get("cwd") or ""
 
     # Layer 2: JSONL first-cwd scan (fallback)
     # NOTE: proj dir names encode '/' as '-', so decoding back is inherently lossy
     # when real dir names contain literal dashes (e.g. "claude-code-swiftbar").
     # Always prefer real_cwd from the jsonl; only fall back to the decoded path for
     # display when real_cwd is unavailable. Never use the decoded path for cwd matching.
-    real_cwd = meta_cwd or read_first_cwd(latest)
+    real_cwd = meta_project_dir or read_first_cwd(latest)
     proj_path_decoded = "/" + proj.lstrip("-").replace("-", "/")
     proj_path = real_cwd or proj_path_decoded
     proj_name = os.path.basename(proj_path) or proj
@@ -499,12 +504,13 @@ for proj in sorted(os.listdir(projects_dir)):
     # Alive judgement happens in a 2nd pass below. Here we just stage the
     # candidate proc match for this session.
     is_recent = (now - mtime) < ALIVE_SECS
-    # claude parent proc doesn't chdir when the user `cd`s in a Bash tool, so its
-    # lsof cwd may still be the session-start dir while meta.workspace.current_dir
-    # has moved to a subdir. Fall back to meta.cwd if proj_path lookup misses.
+    # Match procs only by proj_path (== meta.workspace.project_dir, the launch
+    # root). Do NOT also lookup by current_dir: claude's parent proc never
+    # chdir's, so any proc cwd that matches current_dir but not project_dir
+    # belongs to a *different* session whose project_dir happens to equal this
+    # session's current_dir (e.g. parent-dir session at /Users/x/git would
+    # otherwise steal the proc of a child session at /Users/x/git/foo).
     candidate_matched = cwd_map.get(proj_path, []) if real_cwd else []
-    if not candidate_matched and meta.get("cwd") and meta["cwd"] != proj_path:
-        candidate_matched = cwd_map.get(meta["cwd"], [])
 
     # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
     hook_state, hook_detail = read_hook_status(pdir)
