@@ -15,47 +15,13 @@ set -uo pipefail
 trap 'echo ""; exit 0' ERR
 [ -x /usr/bin/python3 ] || { echo ""; exit 0; }
 
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="$(cd "$BIN_DIR/../.lib" && pwd)"
+
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp"; echo ""; exit 0' EXIT
 cat > "$tmp"
-/usr/bin/python3 - "$tmp" <<'PY'
-import json, os, sys, time
-
-tmp_file = sys.argv[1]
-
-try:
-    with open(tmp_file) as f:
-        event = json.load(f)
-except Exception:
-    sys.exit(0)
-
-transcript_path = event.get("transcript_path", "")
-if not transcript_path:
-    sys.exit(0)
-
-proj_dir = os.path.dirname(transcript_path)
-if not os.path.isdir(proj_dir):
-    sys.exit(0)
-
-meta_file = os.path.join(proj_dir, ".cc-meta.json")
-
-payload = {
-    "session_id": event.get("session_id", ""),
-    "transcript_path": transcript_path,
-    "cwd": event.get("cwd", ""),
-    "workspace": event.get("workspace", {}),
-    "model": event.get("model", {}),
-    "version": event.get("version", ""),
-    "output_style": event.get("output_style", {}),
-    "last_seen": int(time.time()),
-}
-
-try:
-    with open(meta_file, "w") as f:
-        json.dump(payload, f)
-except Exception:
-    pass
-PY
+/usr/bin/python3 "$LIB_DIR/write_meta.py" "$tmp"
 # Empty status line — plugin only uses this hook for metadata side-effect.
 echo ""
 exit 0
