@@ -25,10 +25,38 @@ def load_icon(name):
 
 CC_APP_B64 = load_icon("cc-app")
 
-ICON_B64 = {
-    "iterm": load_icon("iterm"),
-    "idea": load_icon("idea"),
-    "vscode": load_icon("vscode"),
+HOST_TAG = {
+    "iterm": "  [iTerm]",
+    "terminal": "  [Terminal]",
+    "warp": "  [Warp]",
+    "ghostty": "  [Ghostty]",
+    "alacritty": "  [Alacritty]",
+    "kitty": "  [kitty]",
+    "wezterm": "  [WezTerm]",
+    "hyper": "  [Hyper]",
+    "tabby": "  [Tabby]",
+    "vscode": "  [VSCode]",
+    "cursor": "  [Cursor]",
+    "windsurf": "  [Windsurf]",
+    "zed": "  [Zed]",
+    "sublime": "  [Sublime]",
+    "nova": "  [Nova]",
+    "intellij": "  [IntelliJ]",
+    "pycharm": "  [PyCharm]",
+    "webstorm": "  [WebStorm]",
+    "goland": "  [GoLand]",
+    "rubymine": "  [RubyMine]",
+    "clion": "  [CLion]",
+    "phpstorm": "  [PhpStorm]",
+    "rider": "  [Rider]",
+    "datagrip": "  [DataGrip]",
+    "rustrover": "  [RustRover]",
+    "aqua": "  [Aqua]",
+    "appcode": "  [AppCode]",
+    "datasphere": "  [DataSpell]",
+    "androidstudio": "  [AndroidStudio]",
+    "fleet": "  [Fleet]",
+    "jetbrains": "  [JetBrains]",
 }
 
 RUNNING_SECS = 30
@@ -145,7 +173,7 @@ def host_from_entrypoint(ep):
     if "vscode" in ep:
         return "vscode"
     if "jetbrains" in ep or "intellij" in ep or "idea" in ep:
-        return "idea"
+        return "jetbrains"
     return None  # cli or unknown — defer to process inspection
 
 
@@ -276,17 +304,46 @@ def inspect_claude_procs():
                 break
         # Host detection: env vars first, parent chain fallback
         env = info["env"]
+        term_prog = env.get("TERM_PROGRAM", "")
         if "ITERM_SESSION_ID" in env:
             info["host"] = "iterm"
+        elif term_prog == "Apple_Terminal":
+            info["host"] = "terminal"
+        elif term_prog == "WarpTerminal":
+            info["host"] = "warp"
+        elif term_prog == "ghostty":
+            info["host"] = "ghostty"
+        elif term_prog == "WezTerm":
+            info["host"] = "wezterm"
+        elif term_prog == "Hyper":
+            info["host"] = "hyper"
+        elif term_prog == "Tabby":
+            info["host"] = "tabby"
+        elif env.get("ALACRITTY_LOG") or term_prog == "alacritty":
+            info["host"] = "alacritty"
+        elif env.get("KITTY_WINDOW_ID") or env.get("TERM") == "xterm-kitty":
+            info["host"] = "kitty"
         elif (
             "VSCODE_INJECTION" in env
             or "VSCODE_PID" in env
-            or "TERM_PROGRAM" in env
-            and env.get("TERM_PROGRAM") == "vscode"
+            or term_prog == "vscode"
         ):
-            info["host"] = "vscode"
+            # VSCode fork detection: Cursor / Windsurf set distinct CHANNEL strings.
+            ch = (env.get("VSCODE_GIT_ASKPASS_NODE", "") + " " + env.get("VSCODE_IPC_HOOK", "")).lower()
+            if "cursor" in ch:
+                info["host"] = "cursor"
+            elif "windsurf" in ch:
+                info["host"] = "windsurf"
+            else:
+                info["host"] = "vscode"
         elif "TERMINAL_EMULATOR" in env and "JetBrains" in env.get("TERMINAL_EMULATOR", ""):
-            info["host"] = "idea"
+            # JetBrains terminal emulator is shared across all IDEs; the specific
+            # product (PyCharm/WebStorm/...) only shows up in the parent chain.
+            info["host"] = host_from_parent(pid, pid_ppid, pid_comm) or "jetbrains"
+            if info["host"] == "other":
+                info["host"] = "jetbrains"
+        elif term_prog == "zed":
+            info["host"] = "zed"
         elif "CLAUDE_CODE_SSE_PORT" in env:
             # SSE port set by IDE plugin — fallback to parent chain
             info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
@@ -307,8 +364,66 @@ def host_from_parent(pid, pid_ppid, pid_comm):
         low = comm.lower()
         if "iterm" in low:
             return "iterm"
-        if "idea" in low or "intellij" in low or "pycharm" in low or "webstorm" in low or "goland" in low:
-            return "idea"
+        if "warp" in low and "warp.app" in low:
+            return "warp"
+        if "ghostty" in low:
+            return "ghostty"
+        if "alacritty" in low:
+            return "alacritty"
+        if "/kitty" in low or low.endswith("/kitty"):
+            return "kitty"
+        if "wezterm" in low:
+            return "wezterm"
+        if "hyper.app" in low:
+            return "hyper"
+        if "tabby.app" in low:
+            return "tabby"
+        if "/terminal" in low and "/terminal.app/" in low:
+            return "terminal"
+        if "cursor" in low and ("cursor.app" in low or "cursor helper" in low):
+            return "cursor"
+        if "windsurf" in low:
+            return "windsurf"
+        if "/zed" in low and "zed.app" in low:
+            return "zed"
+        if "sublime text" in low:
+            return "sublime"
+        if "nova.app" in low:
+            return "nova"
+        # JetBrains family — match specific IDE name in the .app bundle path.
+        # Order matters: more specific names ("android studio") before catch-alls.
+        if "android studio" in low or "androidstudio" in low:
+            return "androidstudio"
+        if "intellij idea" in low or "/idea " in low or low.endswith("/idea"):
+            return "intellij"
+        if "pycharm" in low:
+            return "pycharm"
+        if "webstorm" in low:
+            return "webstorm"
+        if "goland" in low:
+            return "goland"
+        if "rubymine" in low:
+            return "rubymine"
+        if "clion" in low:
+            return "clion"
+        if "phpstorm" in low:
+            return "phpstorm"
+        if "rider" in low:
+            return "rider"
+        if "datagrip" in low:
+            return "datagrip"
+        if "rustrover" in low:
+            return "rustrover"
+        if "appcode" in low:
+            return "appcode"
+        if "dataspell" in low or "datasphere" in low:
+            return "datasphere"
+        if "/aqua" in low and "aqua.app" in low:
+            return "aqua"
+        if "fleet" in low and "fleet.app" in low:
+            return "fleet"
+        if "jetbrains" in low:
+            return "jetbrains"
         if comm.endswith("/Code") or "Code Helper" in comm:
             return "vscode"
         p = pid_ppid.get(p)
@@ -771,12 +886,6 @@ ICON = {
     "idle": "💤",
     "unknown": "❓",
 }
-HOST_ICON_FALLBACK = {
-    "iterm": "⌨",
-    "idea": "I",
-    "vscode": "V",
-    "other": "·",
-}
 
 # Title shows ONE icon — the highest-priority active state — plus total alive count.
 # Detail breakdown lives in the dropdown.
@@ -859,15 +968,11 @@ else:
         # (so hover highlight & dark mode behave). Color signal lives in the icon.
         dim = s["state"] in ("idle", "unknown")
 
-        host = s["host"] if s["alive"] else "other"
-        host_b64 = ICON_B64.get(host, "") or CC_APP_B64
-
         params = f"bash='{jump_bin}' param1='{s['session']}' param2='{s['proj_path']}' terminal=false"
         if dim:
             params = "color=gray " + params
-        if host_b64:
-            params += f" image={host_b64} width=16 height=16"
-        line = f"{icon} {s['proj']}  ({fmt_age(s['age'])} ago)"
+        host_tag = HOST_TAG.get(s["host"] if s["alive"] else "other", "")
+        line = f"{icon} {s['proj']}{host_tag}  ({fmt_age(s['age'])} ago)"
         print(f"{line} | {params}")
         detail = (s["detail"] or "").replace("|", "/").replace("\n", " ")
         if len(detail) > 90:
