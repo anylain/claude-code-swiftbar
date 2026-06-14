@@ -64,7 +64,7 @@ Hook 事件成簇出现（PreToolUse + PostToolBatch + Stop 等）。writer 用 
 - **`install.sh` 幂等。** hook 事件和 statusLine 都检测后再加。它还会在插件文件名改变时迁移菜单栏图标位置（SwiftBar 把改名当成 uninstall+reinstall 会重置位置）—— 见 `NSStatusItem Preferred Position` 那段。当前迁移目标 key 是 `plugin.10s.sh`，源列表覆盖 `claude-code.10s.sh`、`claude-code.3s.sh`、`plugin.3s.sh`、`plugin.1s.sh`。
 - **入口文件名里的数字就是刷新周期。** `plugin.10s.sh` → SwiftBar 每 10s 轮询一次。改名既影响刷新频率也影响 `NSStatusItem Preferred Position` 偏好 key —— 改前在 `install.sh` 的迁移源列表里加上旧名。
 - **`swiftbar://refreshplugin?name=…` 里的 name 由目录名决定（packaged 模式下）**。见 `SwiftBar/Plugin/PackagedPlugin.swift`：`name = packageDirectory.lastPathComponent.replacingOccurrences(of: ".swiftbar", with: "")`。我们的 `claude-code.swiftbar/` → `name=claude-code`。改 bundle 目录名才会改 URL。`cc-status-writer` 里硬编码的 `claude-code` 必须与目录名（去 `.swiftbar`）一致。
-- **状态优先级在两处必须同步**：单会话分类（见上）和标题图标（`priority_order` 在 `plugin.10s.sh`：needs-permission → error → interrupted → needs-input → running）。README 状态表也是按这个顺序排的。改一处就要同步另两处。
+- **状态优先级在两处必须同步**：单会话分类（见上）和标题图标（`priority_order` 在 `plugin.10s.sh`：needs-permission → needs-decision → error → interrupted → needs-input → running）。README 状态表也是按这个顺序排的。改一处就要同步另两处。
 
 ## SwiftBar 平台信息
 

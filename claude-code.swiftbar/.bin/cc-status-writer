@@ -45,7 +45,22 @@ def tool_detail(tool_name, tool_input):
         return inp.get("subject") or tool_name
     if tool_name in ("Grep", "Glob"):
         return inp.get("pattern") or tool_name
+    if tool_name == "AskUserQuestion":
+        # input.questions[0].question is the human-readable prompt
+        qs = inp.get("questions") or []
+        if qs and isinstance(qs[0], dict):
+            return (qs[0].get("question") or "")[:80] or tool_name
+        return tool_name
+    if tool_name == "ExitPlanMode":
+        return "review plan"
     return (inp.get("description") or inp.get("query") or tool_name)[:60]
+
+# Tools whose "tool_use" semantically means "waiting on user to decide", not
+# "waiting on user to authorize a side effect". Bash/Edit/Write etc. trigger
+# Claude Code's permission dialog → needs-permission. AskUserQuestion and
+# ExitPlanMode block the turn waiting for a user reply / plan approval — that
+# is a decision, not a security gate.
+DECISION_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
 
 def write_status(state, detail=""):
     ts = int(time.time())
@@ -76,7 +91,13 @@ elif event_name == "UserPromptSubmit":
 elif event_name == "PreToolUse":
     name = event.get("tool_name", "?")
     detail = tool_detail(name, event.get("tool_input", {}))
-    write_status("running", f"using {name}: {detail}")
+    if name in DECISION_TOOLS:
+        # Decision tools block the turn the moment they're invoked, no
+        # PermissionRequest fires. Mark needs-decision immediately so the
+        # menu bar reflects "waiting on you" without 1s+ of "running".
+        write_status("needs-decision", detail)
+    else:
+        write_status("running", f"using {name}: {detail}")
 
 elif event_name == "PostToolUse":
     name = event.get("tool_name", "?")
@@ -88,7 +109,10 @@ elif event_name == "PostToolBatch":
 elif event_name == "PermissionRequest":
     name = event.get("tool_name", "?")
     detail = tool_detail(name, event.get("tool_input", {}))
-    write_status("needs-permission", f"approve {name}: {detail}")
+    if name in DECISION_TOOLS:
+        write_status("needs-decision", detail)
+    else:
+        write_status("needs-permission", f"approve {name}: {detail}")
 
 elif event_name == "PermissionDenied":
     write_status("running", "permission denied, continuing…")

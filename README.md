@@ -13,6 +13,7 @@
 | 图标 | 状态             | 含义                                                |
 | :--: | ---------------- | --------------------------------------------------- |
 | 🔐   | needs-permission | 有工具调用待你授权                                  |
+| ✋   | needs-decision   | Claude 在等你做决策（AskUserQuestion / ExitPlanMode）|
 | ❌   | error            | 输出被截断(`max_tokens`)或其他错误                  |
 | ⛔   | interrupted      | 会话在中途被打断                                    |
 | 💬   | needs-input      | 等待你输入                                          |
@@ -21,7 +22,9 @@
 | ❓   | unknown          | 状态无法判定(jsonl 为空或异常)                      |
 
 菜单栏标题只显示**优先级最高**的活跃状态图标(由上至下),例如同时有
-`needs-permission` 和 `running` 时显示 🔐。
+`needs-permission` 和 `running` 时显示 🔐。`needs-decision` 排在
+`needs-permission` 之后、`error` 之前 —— 决策类阻塞和真授权一样需要
+你回应,但不到错误那么紧急。
 
 点击菜单栏图标可看到所有活跃会话,按宿主分组(iTerm / VS Code / JetBrains)。
 点中某个会话即跳到对应窗口 —— 对 iTerm 会精确切到与 `claude` 进程 `tty`

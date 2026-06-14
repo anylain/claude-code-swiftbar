@@ -364,6 +364,14 @@ def classify(entries, mtime, alive_proc, has_active_child):
                     last_text = inp.get("subject")
                 elif last_tool in ("Grep", "Glob"):
                     last_text = inp.get("pattern") or inp.get("command") or ""
+                elif last_tool == "AskUserQuestion":
+                    qs = inp.get("questions") or []
+                    if qs and isinstance(qs[0], dict):
+                        last_text = (qs[0].get("question") or "")[:80]
+                    else:
+                        last_text = "awaiting your decision"
+                elif last_tool == "ExitPlanMode":
+                    last_text = "review plan"
                 else:
                     last_text = (inp.get("description") or inp.get("query") or "")[:60]
             elif ct == "thinking":
@@ -385,10 +393,15 @@ def classify(entries, mtime, alive_proc, has_active_child):
                     last_assistant_tool_ids.append(tid)
     last_pending = [tid for tid in last_assistant_tool_ids if tid not in tool_result_ids]
 
-    # 1) Pending permission: latest assistant is tool_use, no result yet
+    # 1) Pending tool_use with no result yet → either waiting on permission
+    #    (real side-effect tools) or waiting on a decision (AskUserQuestion,
+    #    ExitPlanMode — these block the turn but aren't a security gate).
+    DECISION_TOOLS = ("AskUserQuestion", "ExitPlanMode")
     if t == "assistant" and last_kind == "tool_use" and last_pending:
         if age < RUNNING_SECS:
             return ("running", f"using {last_tool}: {last_text or ''}".strip())
+        if last_tool in DECISION_TOOLS:
+            return ("needs-decision", last_text or last_tool or "awaiting your decision")
         return ("needs-permission", f"approve {last_tool}: {last_text or ''}".strip())
 
     # 2) max_tokens — output was truncated, almost always needs intervention
@@ -584,14 +597,16 @@ sessions.sort(key=lambda s: s["mtime"], reverse=True)
 alive_sessions = [s for s in sessions if s["alive"]]
 running = [s for s in alive_sessions if s["state"] == "running"]
 needs_perm = [s for s in alive_sessions if s["state"] == "needs-permission"]
+needs_decision = [s for s in alive_sessions if s["state"] == "needs-decision"]
 needs_input = [s for s in alive_sessions if s["state"] == "needs-input"]
 errors = [s for s in alive_sessions if s["state"] == "error"]
 interrupted = [s for s in alive_sessions if s["state"] == "interrupted"]
-attention = needs_perm + errors + interrupted + needs_input  # human action required
+attention = needs_perm + needs_decision + errors + interrupted + needs_input  # human action required
 
 ICON = {
     "running": "✨",
     "needs-permission": "🔐",
+    "needs-decision": "✋",
     "needs-input": "💬",
     "error": "❌",
     "interrupted": "⛔",
@@ -609,6 +624,7 @@ HOST_ICON_FALLBACK = {
 # Detail breakdown lives in the dropdown.
 priority_order = [
     ("needs-permission", needs_perm),
+    ("needs-decision",   needs_decision),
     ("error",            errors),
     ("interrupted",      interrupted),
     ("needs-input",      needs_input),
@@ -656,12 +672,13 @@ else:
     # Sort: attention-required first, then running, then idle. Within group: most recent first.
     state_order = {
         "needs-permission": 0,
-        "error": 1,
-        "interrupted": 2,
-        "needs-input": 3,
-        "running": 4,
-        "idle": 5,
-        "unknown": 6,
+        "needs-decision": 1,
+        "error": 2,
+        "interrupted": 3,
+        "needs-input": 4,
+        "running": 5,
+        "idle": 6,
+        "unknown": 7,
     }
     shown = sorted(
         alive_sessions,
