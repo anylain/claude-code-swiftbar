@@ -5,7 +5,6 @@ import os
 import sys
 import json
 import time
-import glob
 import subprocess
 from datetime import datetime
 
@@ -214,33 +213,64 @@ def inspect_claude_procs():
     if not pids:
         return procs
 
-    for pid in pids:
-        info = {"pid": pid, "cwd": None, "env": {}, "host": "other", "has_active_child": False}
-        try:
-            res = subprocess.check_output(
-                ["/usr/sbin/lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], text=True, stderr=subprocess.DEVNULL
-            )
-            for line in res.splitlines():
-                if line.startswith("n"):
-                    info["cwd"] = line[1:]
-                    break
-        except Exception:
-            pass
-        try:
-            envline = subprocess.check_output(
-                ["ps", "-E", "-p", pid, "-o", "command="], text=True, stderr=subprocess.DEVNULL
-            )
-            for tok in envline.split():
+    # Batch lsof + ps -E across ALL claude pids in two forks total (instead of
+    # 2N forks). Both tools accept comma-separated -p lists.
+    cwd_by_pid = {}
+    try:
+        res = subprocess.check_output(
+            ["/usr/sbin/lsof", "-a", "-p", ",".join(pids), "-d", "cwd", "-Fpn"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        # `-Fpn` emits records like:  p<pid>\nf<fd>\nn<path>\n
+        # Walk records, tracking which pid we're inside; first n-line for that pid wins.
+        cur = None
+        for line in res.splitlines():
+            if not line:
+                continue
+            tag, val = line[0], line[1:]
+            if tag == "p":
+                cur = val
+            elif tag == "n" and cur and cur not in cwd_by_pid:
+                cwd_by_pid[cur] = val
+    except Exception:
+        pass
+
+    env_by_pid = {pid: {} for pid in pids}
+    try:
+        envblob = subprocess.check_output(
+            ["ps", "-E", "-o", "pid=,command=", "-p", ",".join(pids)],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        for line in envblob.splitlines():
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            row_pid, cmdline = parts
+            if row_pid not in env_by_pid:
+                continue
+            for tok in cmdline.split():
                 if "=" in tok:
                     k, v = tok.split("=", 1)
-                    info["env"][k] = v
-        except Exception:
-            pass
-        # Detect active *tool* children. claude only forks a shell (Bash tool);
-        # other helpers (MCP/LSP/caffeinate/watchdog) get filtered out.
-        for cpid, cppid in pid_ppid.items():
-            if cppid != pid:
-                continue
+                    env_by_pid[row_pid][k] = v
+    except Exception:
+        pass
+
+    # Pre-bucket children by ppid so detection is O(N) total, not O(N×procs).
+    children_by_ppid = {}
+    for cpid, cppid in pid_ppid.items():
+        children_by_ppid.setdefault(cppid, []).append(cpid)
+
+    for pid in pids:
+        info = {
+            "pid": pid,
+            "cwd": cwd_by_pid.get(pid),
+            "env": env_by_pid.get(pid, {}),
+            "host": "other",
+            "has_active_child": False,
+        }
+        for cpid in children_by_ppid.get(pid, ()):
             if pid_comm.get(cpid, "") in TOOL_CHILD_COMMS:
                 info["has_active_child"] = True
                 break
@@ -259,20 +289,20 @@ def inspect_claude_procs():
             info["host"] = "idea"
         elif "CLAUDE_CODE_SSE_PORT" in env:
             # SSE port set by IDE plugin — fallback to parent chain
-            info["host"] = host_from_parent(pid)
+            info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
         else:
-            info["host"] = host_from_parent(pid)
+            info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
         procs.append(info)
     return procs
 
 
-def host_from_parent(pid):
+def host_from_parent(pid, pid_ppid, pid_comm):
+    # Walk the parent chain using the global ps snapshot — no extra forks.
     p = pid
     seen = 0
     while p and p not in ("0", "1") and seen < 30:
-        try:
-            comm = subprocess.check_output(["ps", "-o", "comm=", "-p", p], text=True, stderr=subprocess.DEVNULL).strip()
-        except Exception:
+        comm = pid_comm.get(p, "")
+        if not comm:
             break
         low = comm.lower()
         if "iterm" in low:
@@ -281,10 +311,7 @@ def host_from_parent(pid):
             return "idea"
         if comm.endswith("/Code") or "Code Helper" in comm:
             return "vscode"
-        try:
-            p = subprocess.check_output(["ps", "-o", "ppid=", "-p", p], text=True, stderr=subprocess.DEVNULL).strip()
-        except Exception:
-            break
+        p = pid_ppid.get(p)
         seen += 1
     return "other"
 
@@ -498,17 +525,58 @@ for p in procs:
     if p["cwd"]:
         cwd_map.setdefault(p["cwd"], []).append(p)
 
+# Pre-compute the set of proj-dir basenames that any live claude proc COULD
+# belong to. Used as a fast-skip check below — if a project's mtime is stale
+# AND no proc cwd encodes to its dir name AND it has no fresh hook status,
+# we can skip the expensive jsonl/meta/entrypoint reads entirely.
+# Encoding: claude stores `/Users/x/foo` as proj-dir `-Users-x-foo`.
+proc_proj_keys = set()
+for cwd in cwd_map:
+    if cwd.startswith("/"):
+        proc_proj_keys.add(cwd.replace("/", "-"))
+
+
 sessions = []
 for proj in sorted(os.listdir(projects_dir)):
     pdir = os.path.join(projects_dir, proj)
     if not os.path.isdir(pdir):
         continue
-    files = glob.glob(os.path.join(pdir, "*.jsonl"))
-    if not files:
+
+    # FAST PATH: scan the dir once with scandir so we don't pay 488 separate
+    # stat calls. Find the newest *.jsonl mtime AND check for the .cc-status.json
+    # sentinel in a single pass.
+    latest_path = None
+    latest_mtime = 0.0
+    has_status_file = False
+    try:
+        for de in os.scandir(pdir):
+            name = de.name
+            if name.endswith(".jsonl"):
+                try:
+                    m = de.stat().st_mtime
+                except OSError:
+                    continue
+                if m > latest_mtime:
+                    latest_mtime = m
+                    latest_path = de.path
+            elif name == ".cc-status.json":
+                has_status_file = True
+    except OSError:
         continue
-    latest = max(files, key=os.path.getmtime)
-    mtime = os.path.getmtime(latest)
-    entries = read_last_entries(latest)
+    if latest_path is None:
+        continue
+
+    # Cheap dead-project skip: stale jsonl + no hook sentinel + no claude proc
+    # plausibly rooted here. Saves read_last_entries/read_meta/read_entrypoint
+    # for ~80% of historical projects on a busy machine.
+    is_recent = (now - latest_mtime) < ALIVE_SECS
+    proc_could_match = proj in proc_proj_keys
+    if not is_recent and not has_status_file and not proc_could_match:
+        continue
+
+    files_latest = latest_path
+    mtime = latest_mtime
+    entries = read_last_entries(files_latest)
 
     # Layer 1 (highest priority): statusLine-written .cc-meta.json
     meta = read_meta(pdir)
@@ -525,19 +593,18 @@ for proj in sorted(os.listdir(projects_dir)):
     # when real dir names contain literal dashes (e.g. "claude-code-swiftbar").
     # Always prefer real_cwd from the jsonl; only fall back to the decoded path for
     # display when real_cwd is unavailable. Never use the decoded path for cwd matching.
-    real_cwd = meta_project_dir or read_first_cwd(latest)
+    real_cwd = meta_project_dir or read_first_cwd(files_latest)
     proj_path_decoded = "/" + proj.lstrip("-").replace("-", "/")
     proj_path = real_cwd or proj_path_decoded
     proj_name = os.path.basename(proj_path) or proj
 
     # Authoritative host from jsonl entrypoint (set by claude CLI based on launch context).
     # statusLine doesn't expose this signal, so we still scan jsonl.
-    entrypoint = read_entrypoint(latest)
+    entrypoint = read_entrypoint(files_latest)
     host_from_ep = host_from_entrypoint(entrypoint)
 
     # Alive judgement happens in a 2nd pass below. Here we just stage the
     # candidate proc match for this session.
-    is_recent = (now - mtime) < ALIVE_SECS
     # Match procs only by proj_path (== meta.workspace.project_dir, the launch
     # root). Do NOT also lookup by current_dir: claude's parent proc never
     # chdir's, so any proc cwd that matches current_dir but not project_dir
@@ -554,7 +621,7 @@ for proj in sorted(os.listdir(projects_dir)):
             "proj": proj_name,
             "proj_path": proj_path,
             "pdir": pdir,
-            "session": os.path.basename(latest).replace(".jsonl", ""),
+            "session": os.path.basename(files_latest).replace(".jsonl", ""),
             "mtime": mtime,
             "age": now - mtime,
             "is_recent": is_recent,
