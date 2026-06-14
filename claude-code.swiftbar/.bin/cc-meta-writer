@@ -7,7 +7,12 @@
 # Output: stdout is consumed by Claude Code as the status line text — we
 #   print an empty string so the plugin doesn't pollute the user's status
 #   line. (Users wanting a real statusline should chain another tool.)
-set -euo pipefail
+#
+# CRITICAL: Like cc-status-writer, this is a Claude Code hook. Failures must
+# never propagate — emit "" + exit 0 even if everything else broke.
+# Validate any change with `bash -n` before saving.
+set -uo pipefail
+trap 'echo ""; exit 0' ERR
 [ -x /usr/bin/python3 ] || { echo ""; exit 0; }
 
 tmp="$(mktemp)"
@@ -53,3 +58,4 @@ except Exception:
 PY
 # Empty status line — plugin only uses this hook for metadata side-effect.
 echo ""
+exit 0

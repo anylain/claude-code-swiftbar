@@ -4,7 +4,13 @@
 # ~/.claude/settings.json (or project .claude/settings.json).
 #
 # Reads hook event JSON from stdin; writes ~/.claude/projects/<proj>/.cc-status.json
-set -euo pipefail
+#
+# CRITICAL: This script is invoked from UserPromptSubmit and other blocking
+# hooks. Any non-zero exit will block the user's prompt. So we trap all errors
+# and force exit 0 — a broken status file is acceptable, blocking the user is
+# NOT. Validate any change with `bash -n` before saving.
+set -uo pipefail
+trap 'exit 0' ERR
 command -v python3 >/dev/null 2>&1 || exit 0
 
 # Save stdin to a temp file — the heredoc below will consume stdin otherwise.
@@ -168,3 +174,6 @@ fi
   sleep 1
   /usr/bin/open -g "swiftbar://refreshplugin?name=claude-code" 2>/dev/null || true
 ) </dev/null >/dev/null 2>&1 &
+
+# Belt-and-suspenders: never let this hook block the user's prompt.
+exit 0
