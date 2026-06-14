@@ -204,29 +204,59 @@ elif event_name == "PostCompact":
 PY
 rm -f "$tmp"
 
-# ── Trailing-edge debounce: collapse hook bursts into one URL refresh ──────
-# Multiple hooks within 1s share a single trailing worker; only the worker
-# that wins the LOCK race fires `swiftbar://refreshplugin?name=claude-code`.
-# Spec: docs/superpowers/specs/2026-06-14-swiftbar-cpu-perf-design.md
-LOCK="/tmp/cc-swiftbar-lock-$UID"
-
-# Stale LOCK recovery: if a worker was SIGKILL'd mid-sleep, its EXIT trap
-# never ran and the LOCK would silence all future refreshes until reboot.
-# Treat any LOCK older than 5s as stale.
-if [ -e "$LOCK" ]; then
-  if /usr/bin/python3 -c "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('$LOCK') > 5 else 1)" 2>/dev/null; then
-    rm -f "$LOCK"
-  else
-    exit 0
-  fi
-fi
-
-(
-  : > "$LOCK"
-  trap 'rm -f "$LOCK"' EXIT
-  sleep 1
+# ── SwiftBar refresh: debounced by default ────────────────────────────────
+# Hook events fire in clusters (PreToolUse + PostToolBatch + Stop within
+# ~100ms). Trailing-edge debounce via /tmp/cc-swiftbar-lock-$UID collapses
+# them into one refresh per 1s window to keep SwiftBar's CPU low.
+#
+# URL: we fire BOTH names back-to-back. Reason — SwiftBar's plugin-name lookup
+# changes between releases and there's no single string that works on both:
+#
+#   - v2.0.1 (current release): no packaged-plugin support; our bundle is
+#     scanned as a plain directory and `plugin.10s.sh` is loaded as
+#     ExecutablePlugin → id="plugin.10s.sh", name="plugin". `?name=claude-code`
+#     finds nothing and is silently dropped.
+#   - main branch (untagged as of 2026-06): packaged-plugin support landed.
+#     `claude-code.swiftbar/` is loaded as PackagedPlugin → name="claude-code".
+#     The bundle's inner `plugin.10s.sh` is no longer registered as its own
+#     plugin, so `?name=plugin.10s.sh` finds nothing.
+#
+# Firing both URLs is cheap: SwiftBar's `getPluginByNameOrID` is an O(n)
+# lookup over a tiny plugin list and does nothing on miss. Whichever name is
+# valid for the running SwiftBar version refreshes us; the other no-ops.
+# When the v2.0.1 install base is gone we can drop the `plugin.10s.sh` URL.
+#
+# Cost: state changes lag ~1s before reaching the menu bar. To verify or
+# debug a state-change timing issue, disable debounce:
+#   CC_REFRESH_DEBOUNCE=0 (env var) OR `touch /tmp/cc-refresh-debounce.disabled`
+# Then refresh fires immediately on every hook event.
+fire_refresh() {
+  # v2.0.1: matches id="plugin.10s.sh"
+  /usr/bin/open -g "swiftbar://refreshplugin?name=plugin.10s.sh" 2>/dev/null || true
+  # post-packaged-plugin SwiftBar: matches name="claude-code"
   /usr/bin/open -g "swiftbar://refreshplugin?name=claude-code" 2>/dev/null || true
-) </dev/null >/dev/null 2>&1 &
+}
+if [ "${CC_REFRESH_DEBOUNCE:-1}" = "0" ] || [ -e /tmp/cc-refresh-debounce.disabled ]; then
+  fire_refresh
+else
+  # Stale lock recovery: > 5s old means the prior worker was SIGKILL'd
+  # and its EXIT trap never ran — without recovery the lock would silence
+  # all future refreshes until reboot.
+  LOCK="/tmp/cc-swiftbar-lock-$UID"
+  if [ -e "$LOCK" ]; then
+    if /usr/bin/python3 -c "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('$LOCK') > 5 else 1)" 2>/dev/null; then
+      rm -f "$LOCK"
+    else
+      exit 0
+    fi
+  fi
+  (
+    : > "$LOCK"
+    trap 'rm -f "$LOCK"' EXIT
+    sleep 1
+    fire_refresh
+  ) </dev/null >/dev/null 2>&1 &
+fi
 
 # Belt-and-suspenders: never let this hook block the user's prompt.
 exit 0

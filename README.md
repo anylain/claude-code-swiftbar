@@ -61,7 +61,7 @@ Hook 写入的状态文件（`.cc-status.json`）有效期为 60 秒，超时后
 自动回退到 JSONL 解析方式，确保未配置 hook 的项目也正常工作。
 
 **主动刷新**：`cc-status-writer` 每次写完状态会用 trailing-edge 防抖
-（1s 窗口合并）触发 `swiftbar://refreshplugin?name=claude-code`，
+（1s 窗口合并）触发 `swiftbar://refreshplugin?name=plugin.10s.sh`，
 让 SwiftBar 在 ~1s 内反映状态变化，而不是等 10s 兜底轮询。
 连发的 hook 事件（PreToolUse + PostToolBatch + Stop）只会触发 1 次刷新。
 
