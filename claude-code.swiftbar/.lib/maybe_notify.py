@@ -49,6 +49,11 @@ def main():
     proj_dir = os.path.dirname(transcript_path)
     if not proj_dir:
         return
+    # cwd from the hook event (when present) is the authoritative human-readable
+    # path; proj_dir is the encoded ~/.claude/projects/<dashed>/ form, which is
+    # ambiguous to decode (real directory names can contain dashes). We pass
+    # cwd into iTerm foreground detection too.
+    cwd = event.get("cwd", "") or ""
 
     status_path = os.path.join(proj_dir, STATUS_FILE_NAME)
     try:
@@ -85,16 +90,31 @@ def main():
 
     host = _host_from_transcript(transcript_path)
 
-    if _is_host_foreground(host, proj_dir):
+    # Foreground check uses cwd (real path) when present; falls back to proj_dir
+    # only if the event didn't carry cwd (older Claude Code or non-standard hook).
+    fg_path = cwd or proj_dir
+    if _is_host_foreground(host, fg_path):
         return
 
-    proj_name = os.path.basename(proj_dir.lstrip("-").replace("-", "/")) or "Claude"
-    title = "Claude Code"
+    # Project display name: prefer cwd (authoritative) over proj_dir decode.
+    proj_name = os.path.basename(cwd.rstrip("/")) if cwd else \
+        (os.path.basename(proj_dir.lstrip("-").replace("-", "/")) or "Claude")
+    # macOS notifications always use the sending app's icon (SwiftBar). We can't
+    # override that, so the emoji goes into the subtitle (next to the action
+    # text where it reads as a status marker) rather than crowding the title.
+    # Layout:
+    #   title    = <project>          ← biggest, the most useful "where is this?"
+    #   subtitle = <emoji> <action>   ← what kind of pause this is
+    #   body     = <detail>           ← what specifically Claude is waiting on
     if state == "needs-permission":
-        subtitle = f"{proj_name} · 等待授权"
-    else:
-        subtitle = f"{proj_name} · 等待决策"
-    body = (detail or "")[:120]
+        emoji = "🔐"
+        action = "等待授权"
+    else:  # needs-decision
+        emoji = "✋"
+        action = "等待你的决定"
+    title = proj_name
+    subtitle = f"{emoji} {action}"
+    body = (detail or "").strip()[:200]
 
     _fire_notification(title, subtitle, body)
 
