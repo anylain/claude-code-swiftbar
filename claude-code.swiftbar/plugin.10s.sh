@@ -47,6 +47,30 @@ IDLE_SECS = 5
 ALIVE_SECS = 120  # jsonl modified within 2 min => session is "alive"
 THINK_GRACE = 180  # alive proc + no child + jsonl silent < THINK_GRACE => still thinking
 HOOK_STATUS_TTL = 60  # hook-written .cc-status.json valid for 60s before fallback to classify
+
+# DEBUG (TEMPORARY): per-refresh decision timeline. Opt-in via env var or
+# sentinel file. Pairs with cc-status-writer's /tmp/cc-status-history.log to
+# answer "what did writer last say vs. what did plugin decide?".
+PLUGIN_DEBUG_LOG = "/tmp/cc-plugin-debug.log"
+PLUGIN_DEBUG_MAX_BYTES = 1_000_000
+PLUGIN_DEBUG_ENABLED = (
+    os.environ.get("CC_PLUGIN_DEBUG") == "1"
+    or os.path.exists("/tmp/cc-plugin-debug.enabled")
+)
+
+def _plugin_debug(lines):
+    if not PLUGIN_DEBUG_ENABLED:
+        return
+    try:
+        if os.path.getsize(PLUGIN_DEBUG_LOG) > PLUGIN_DEBUG_MAX_BYTES:
+            os.remove(PLUGIN_DEBUG_LOG)
+    except (FileNotFoundError, OSError):
+        pass
+    try:
+        with open(PLUGIN_DEBUG_LOG, "a") as f:
+            f.write("".join(lines))
+    except Exception:
+        pass
 # claude only forks ONE kind of child synchronously when running a tool: a shell
 # for the Bash tool. Every other tool (Read/Edit/Write/Grep/Glob/...) runs in-process.
 # So a "real tool is running" signal = direct child whose comm is the user's shell.
@@ -540,6 +564,7 @@ for proj in sorted(os.listdir(projects_dir)):
     sessions.append({
         "proj": proj_name,
         "proj_path": proj_path,
+        "pdir": pdir,
         "session": os.path.basename(latest).replace(".jsonl", ""),
         "mtime": mtime,
         "age": now - mtime,
@@ -576,10 +601,13 @@ for idx, s in enumerate(sessions):
             # SessionEnd tombstone — the session has explicitly exited. Don't let
             # JSONL is_recent keep it "alive" for the next 120s; drop it now.
             alive = False
+            decision_path = "hook-ended"
         else:
             alive = True  # hook only fires for live sessions
+            decision_path = "hook"
     else:
         state, detail = classify(s["entries"], s["mtime"], alive_proc=alive, has_active_child=has_child)
+        decision_path = "classify"
 
     if alive:
         if s["host_from_ep"]:
@@ -596,10 +624,47 @@ for idx, s in enumerate(sessions):
     s["host"] = host
     s["alive"] = alive
     s["matched"] = matched
+    s["_decision_path"] = decision_path  # debug-only, popped below
     # Drop staging-only fields so downstream code sees the same shape as before.
     for k in ("is_recent", "candidate_matched", "hook_state", "hook_detail",
               "host_from_ep", "entries"):
         s.pop(k, None)
+
+# DEBUG (TEMPORARY): dump per-refresh decision snapshot. Pairs with writer's
+# /tmp/cc-status-history.log. Compare timelines to find "writer wrote needs-input
+# but plugin shows running" or "writer cleared but plugin still alive" bugs.
+if PLUGIN_DEBUG_ENABLED:
+    lines = []
+    iso = time.strftime("%FT%T", time.localtime(now))
+    lines.append(f"=== {int(now)}\t{iso}\tprocs={len(procs)}\tsessions={len(sessions)} ===\n")
+    for p in procs:
+        lines.append(f"  proc pid={p['pid']}\tcwd={p.get('cwd') or '-'}\thost={p['host']}\tchild={p.get('has_active_child')}\n")
+    for s in sessions:
+        # Re-read raw status file to expose what was on disk regardless of TTL.
+        raw_state = "-"
+        raw_age = "-"
+        try:
+            with open(os.path.join(s["pdir"], ".cc-status.json")) as f:
+                d = json.load(f)
+                raw_state = d.get("state", "-")
+                raw_ts = d.get("ts", 0)
+                raw_age = int(now - raw_ts) if raw_ts else "-"
+        except Exception:
+            pass
+        sid8 = (s.get("session") or "")[:8]
+        n_matched = len(s.get("matched") or [])
+        lines.append(
+            f"  sess {sid8}\tproj={s['proj']}\tpath={s['proj_path']}\t"
+            f"mtime_age={int(s['age'])}s\tmatched_procs={n_matched}\t"
+            f"raw_status={raw_state}(age={raw_age}s)\t"
+            f"path_taken={s.get('_decision_path')}\t"
+            f"=> alive={s['alive']}\tstate={s['state']}\thost={s['host']}\n"
+        )
+    _plugin_debug(lines)
+# Pop debug-only field after dump.
+for s in sessions:
+    s.pop("_decision_path", None)
+    s.pop("pdir", None)
 
 # Drift fallback: any alive session still without a host (no entrypoint, no cwd-match)
 # gets assigned a stale claude proc — the one whose home project was modified longest ago.
