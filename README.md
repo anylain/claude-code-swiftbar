@@ -110,10 +110,19 @@ cd claude-code-swiftbar
 后续升级:`git pull` 即可,软链会自动指向新代码。
 
 > **从 v2.x 升级到 v3.x**：v3 把入口脚本从 `claude-code.10s.sh` 改名为
-> `plugin.10s.sh`，转为 SwiftBar 标准的 packaged plugin 形式。`git pull` 后
-> **请重跑一次 `./install.sh`** —— 它会幂等迁移菜单栏图标位置（否则 SwiftBar
-> 会把图标放回最右侧）。Hook URL（`?name=claude-code`）和已写入
-> `~/.claude/settings.json` 的命令路径都不变。
+> `plugin.10s.sh`，转为 SwiftBar 标准的 packaged plugin 形式。
+>
+> 1. `git pull`
+> 2. 重跑一次 `./install.sh` —— 它会幂等迁移菜单栏图标位置（否则
+>    SwiftBar 会把图标放回最右侧）
+> 3. **退出并重启 SwiftBar**：`killall SwiftBar && open -a SwiftBar`
+>    （或托盘菜单 Quit 后重新打开）。**菜单栏的 Refresh All 不够** —— 它
+>    只重跑已注册的脚本路径，不会重新发现 bundle 入口。不重启的话，
+>    SwiftBar 会一直按旧文件名 `claude-code.10s.sh` 调用，每次刷新都
+>    报 `No such file or directory`。
+>
+> Hook URL（`?name=claude-code`）和已写入 `~/.claude/settings.json`
+> 的命令路径都不变。
 
 ## 手动安装
 

@@ -186,4 +186,7 @@ else
 fi
 
 echo
-echo "Next step: open SwiftBar menu > Refresh All (or restart SwiftBar)."
+echo "Next step: restart SwiftBar so it re-discovers the plugin bundle:"
+echo "  killall SwiftBar && open -a SwiftBar"
+echo "(Refresh All from the SwiftBar menu only re-runs already-registered"
+echo " plugin paths — it won't pick up a renamed entry script.)"
