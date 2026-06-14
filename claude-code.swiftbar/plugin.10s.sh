@@ -132,13 +132,18 @@ def host_from_entrypoint(ep):
     return None  # cli or unknown — defer to process inspection
 
 def read_hook_status(pdir):
-    """Read hook-written status file. Returns (state, detail) or (None, None)."""
+    """Read hook-written status file. Returns (state, detail) or (None, None).
+    state="ended" tombstones bypass HOOK_STATUS_TTL — once a session is over,
+    it stays over until SessionStart writes a new state."""
     path = os.path.join(pdir, ".cc-status.json")
     try:
         with open(path) as f:
             d = json.load(f)
+        state = d.get("state")
+        if state == "ended":
+            return state, d.get("detail", "")
         if now - d.get("ts", 0) < HOOK_STATUS_TTL:
-            return d.get("state"), d.get("detail", "")
+            return state, d.get("detail", "")
     except Exception:
         pass
     return None, None
@@ -156,15 +161,18 @@ def read_meta(pdir):
 # Inspect every live claude process: PID, env vars, cwd
 def inspect_claude_procs():
     procs = []
-    try:
-        pids = subprocess.check_output(["pgrep", "-x", "claude"], text=True).split()
-    except subprocess.CalledProcessError:
-        return procs
 
     # Snapshot pid → (ppid, comm) for every process in one ps call. We use comm
     # (kernel-recorded program name) — NOT command/args — to filter non-tool
     # children: command can contain Bash-tool source code that happens to mention
     # "mcp"/"caffeinate" and would cause false positives.
+    #
+    # We derive the claude pid list from this ps snapshot rather than calling
+    # `pgrep -x claude`. Reason: on macOS 26 (Darwin 25.x), `pgrep -x claude`
+    # intermittently misses live claude processes that ps clearly lists with
+    # comm="claude" (reproduced: two claude procs in ps, pgrep -x returns one).
+    # The exact filtering rule pgrep applies is opaque; ps + explicit comm match
+    # is reliable across macOS versions.
     pid_ppid = {}
     pid_comm = {}
     try:
@@ -180,7 +188,16 @@ def inspect_claude_procs():
             pid_ppid[cpid] = cppid
             pid_comm[cpid] = comm
     except Exception:
-        pass
+        return procs
+
+    # comm may be a bare name ("claude") or, in rare cases, an absolute path.
+    # Match either form.
+    pids = [
+        cpid for cpid, comm in pid_comm.items()
+        if comm == "claude" or os.path.basename(comm) == "claude"
+    ]
+    if not pids:
+        return procs
 
     for pid in pids:
         info = {"pid": pid, "cwd": None, "env": {}, "host": "other", "has_active_child": False}
@@ -430,7 +447,12 @@ def classify(entries, mtime, alive_proc, has_active_child):
     # 5b) Alive proc, no child, but jsonl silent under THINK_GRACE — assume the
     #     model is thinking / streaming a long reply with no tool call yet. Without
     #     this, a long pure-reasoning turn would flip to idle within RUNNING_SECS.
-    if alive_proc and not has_active_child and age < THINK_GRACE:
+    #     Skip when last assistant has stop_reason=end_turn: that's an explicit
+    #     "turn ended cleanly" signal — the next entry is system metadata, not
+    #     thinking. Without this guard, sessions that exited via Ctrl+C / window
+    #     close keep showing "running" for THINK_GRACE seconds because alive_proc
+    #     stays True via is_recent (jsonl mtime < ALIVE_SECS).
+    if alive_proc and not has_active_child and age < THINK_GRACE and last_stop_reason != "end_turn":
         if t == "assistant" and last_kind in ("thinking", "text"):
             return ("running", "thinking…")
         if t == "user":
@@ -550,7 +572,12 @@ for idx, s in enumerate(sessions):
 
     if s["hook_state"]:
         state, detail = s["hook_state"], s["hook_detail"]
-        alive = True  # hook only fires for live sessions
+        if state == "ended":
+            # SessionEnd tombstone — the session has explicitly exited. Don't let
+            # JSONL is_recent keep it "alive" for the next 120s; drop it now.
+            alive = False
+        else:
+            alive = True  # hook only fires for live sessions
     else:
         state, detail = classify(s["entries"], s["mtime"], alive_proc=alive, has_active_child=has_child)
 

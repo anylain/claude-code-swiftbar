@@ -139,7 +139,12 @@ def clear_status(ev_name=""):
     _append_history(ev_name, "<cleared>", "")
 
 if event_name == "SessionEnd":
-    clear_status(ev_name=event_name)
+    # Write a tombstone instead of deleting. The plugin treats `state=ended`
+    # as "session over, drop from UI immediately" — without it, the plugin's
+    # JSONL heuristics keep the session marked alive for ALIVE_SECS=120s after
+    # the last write, which makes `claude` exit not reflect in the menu bar.
+    # The tombstone has no TTL on the writer side; the plugin enforces its own.
+    write_status("ended", "session ended", ev_name=event_name)
 
 elif event_name == "SessionStart":
     write_status("running", "starting session…", ev_name=event_name)
