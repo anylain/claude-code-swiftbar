@@ -94,18 +94,17 @@ elif event_name == "PermissionDenied":
     write_status("running", "permission denied, continuing…")
 
 elif event_name == "Stop":
-    stop_reason = event.get("stop_reason", "")
+    # Note: Claude Code's Stop hook payload does NOT carry `stop_reason` —
+    # the field exists on assistant jsonl entries but isn't propagated to
+    # the hook event. So we infer turn end from `tool_calls` alone:
+    # empty list → turn fully ended (needs your input);
+    # non-empty → tools queued, still running.
     tool_calls = event.get("tool_calls", []) or []
-    if stop_reason == "end_turn" and not tool_calls:
+    if not tool_calls:
         write_status("needs-input", "awaiting your input")
-    elif stop_reason == "max_tokens" and not tool_calls:
-        write_status("error", "output truncated (max_tokens)")
     else:
-        if tool_calls:
-            tc_names = [tc.get("name", "?") for tc in tool_calls[:3]]
-            write_status("running", f"executing {', '.join(tc_names)}…")
-        else:
-            write_status("running", "Claude is responding…")
+        tc_names = [tc.get("name", "?") for tc in tool_calls[:3]]
+        write_status("running", f"executing {', '.join(tc_names)}…")
 
 elif event_name == "StopFailure":
     err_type = event.get("error_type", "")
