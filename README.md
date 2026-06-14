@@ -1,19 +1,19 @@
 # Claude Code SwiftBar
 
-一个 [SwiftBar](https://github.com/swiftbar/SwiftBar) 插件,在 macOS 菜单栏实时显示
+[SwiftBar](https://github.com/swiftbar/SwiftBar) 插件,在 macOS 菜单栏实时显示
 [Claude Code](https://claude.com/claude-code) 会话状态,点击可一键跳回会话所在窗口
 (iTerm 标签页、VS Code、JetBrains)。
 
 ![菜单栏](docs/menubar.png)
 
-## 状态说明
+## 状态图标
 
-菜单栏图标会反映所有 Claude Code 项目中"最值得你关注"的那一个会话:
+菜单栏只显示**优先级最高**的活跃会话状态(由上至下):
 
 | 图标 | 状态             | 含义                                                |
 | :--: | ---------------- | --------------------------------------------------- |
 | 🔐   | needs-permission | 有工具调用待你授权                                  |
-| ✋   | needs-decision   | Claude 在等你做决策（AskUserQuestion / ExitPlanMode）|
+| ✋   | needs-decision   | Claude 在等你做决策(AskUserQuestion / ExitPlanMode) |
 | ❌   | error            | 输出被截断(`max_tokens`)或其他错误                  |
 | ⛔   | interrupted      | 会话在中途被打断                                    |
 | 💬   | needs-input      | 等待你输入                                          |
@@ -21,77 +21,11 @@
 | 💤   | idle             | 上一轮回复已完成,无需操作                           |
 | ❓   | unknown          | 状态无法判定(jsonl 为空或异常)                      |
 
-菜单栏标题只显示**优先级最高**的活跃状态图标(由上至下),例如同时有
-`needs-permission` 和 `running` 时显示 🔐。`needs-decision` 排在
-`needs-permission` 之后、`error` 之前 —— 决策类阻塞和真授权一样需要
-你回应,但不到错误那么紧急。
-
-点击菜单栏图标可看到所有活跃会话,按宿主分组(iTerm / VS Code / JetBrains)。
-点中某个会话即跳到对应窗口 —— 对 iTerm 会精确切到与 `claude` 进程 `tty`
-匹配的那个标签页。
-
-## 依赖
-
-- macOS,已安装 [SwiftBar](https://github.com/swiftbar/SwiftBar)
-- Bash 与 `/usr/bin/python3`(macOS 自带)
-- Claude Code(会在 `~/.claude/projects/` 下生成 JSONL 会话文件)
-
-不需要 Homebrew 或其他额外依赖。
-
-## Hook（自动配置，大幅提升状态准确度）
-
-插件默认通过解析 JSONL 推断状态，有 10s 轮询延迟且依赖启发式规则。
-启用 Claude Code hooks 后，状态变为**事件驱动**，~1s 内响应，准确度大幅提升。
-
-`install.sh` 已经会幂等地把 10 个 hook 事件
-（`UserPromptSubmit` / `PreToolUse` / `PostToolBatch` / `Stop` / `StopFailure` /
-`PermissionRequest` / `PreCompact` / `PostCompact` / `SessionStart` / `SessionEnd`）
-写入 `~/.claude/settings.json`，命令形如：
-
-```json
-{ "type": "command", "command": "bash \"<plugin-bundle>/.bin/cc-status-writer\"" }
-```
-
-`<plugin-bundle>` 是软链路径 `~/Library/.../SwiftBar/Plugins/claude-code.swiftbar`
-（具体由 `defaults read com.ameba.SwiftBar PluginDirectory` 决定）。
-**不要把命令里的绝对路径替换成 `$CLAUDE_PROJECT_DIR`** —— 那个变量指向的是用户
-当前会话的项目目录，不是插件 bundle。
-
-Hook 写入的状态文件（`.cc-status.json`）有效期为 60 秒，超时后插件
-自动回退到 JSONL 解析方式，确保未配置 hook 的项目也正常工作。
-
-**主动刷新**：`cc-status-writer` 每次写完状态会用 trailing-edge 防抖
-（1s 窗口合并）触发 `swiftbar://refreshplugin?name=plugin.10s.sh`，
-让 SwiftBar 在 ~1s 内反映状态变化，而不是等 10s 兜底轮询。
-连发的 hook 事件（PreToolUse + PostToolBatch + Stop）只会触发 1 次刷新。
-
-## statusLine（可选，让 cwd / model 实时准确）
-
-statusLine 钩子由 Claude Code 在每次状态行刷新时触发，给插件提供权威的
-`session_id`、`cwd`、`workspace.current_dir`、`model` 等元数据。**有了它，
-用户在会话中 `cd` 切目录时菜单栏 1-2 秒内就能反映**——不再依赖扫 JSONL 头部的
-启发式（那种方式拿到的是会话第一条记录的 cwd，会过时）。
-
-`install.sh` 会幂等地往 `~/.claude/settings.json` 写入：
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bash \"<plugin>/.bin/cc-meta-writer\""
-  }
-}
-```
-
-**如果你已经装了别的 statusline 工具**（比如 ccometix、claude-code-statusline-pro），
-脚本会**警告并跳过**，不覆盖你的配置。要兼容,可以让你现有的 statusline 命令在
-最前面调一次 `cc-meta-writer`（它的 stdout 是空字符串，不影响展示）。
-
-`cc-meta-writer` 写入的 `.cc-meta.json` **没有 TTL**——元数据一旦写过就一直有效，
-直到下一次会话事件覆盖。状态信号仍由 hook（`.cc-status.json`）和 JSONL 启发式
-负责，三层独立、字段级 fallback。
+点开下拉看所有活跃会话,按宿主分组(iTerm / VS Code / JetBrains)。点中某个会话即跳到对应窗口 —— 对 iTerm 会精确切到与 `claude` 进程 `tty` 匹配的标签页。
 
 ## 安装
+
+依赖:macOS、[SwiftBar](https://github.com/swiftbar/SwiftBar)、Claude Code。无需 Homebrew 或其他依赖(用 macOS 自带的 bash + `/usr/bin/python3`)。
 
 ```bash
 git clone https://github.com/anylain/claude-code-swiftbar.git
@@ -99,55 +33,23 @@ cd claude-code-swiftbar
 ./install.sh
 ```
 
-脚本会读取 SwiftBar 配置的插件目录(`defaults read com.ameba.SwiftBar PluginDirectory`),
-把 `claude-code.swiftbar/` 软链过去。然后在 SwiftBar 菜单选 **Refresh All** 即可。
+`install.sh` 把 `claude-code.swiftbar/` 软链到 SwiftBar 的插件目录,并幂等地往 `~/.claude/settings.json` 写入 hook 与 statusLine 配置。装完在 SwiftBar 菜单选 **Refresh All**。
 
-后续升级:`git pull` 即可,软链会自动指向新代码。
+升级:`git pull` 即可,软链自动指向新代码。
 
-> **从 v2.x 升级到 v3.x**：v3 把入口脚本从 `claude-code.10s.sh` 改名为
-> `plugin.10s.sh`，转为 SwiftBar 标准的 packaged plugin 形式。
->
-> 1. `git pull`
-> 2. 重跑一次 `./install.sh` —— 它会幂等迁移菜单栏图标位置（否则
->    SwiftBar 会把图标放回最右侧）
-> 3. **退出并重启 SwiftBar**：`killall SwiftBar && open -a SwiftBar`
->    （或托盘菜单 Quit 后重新打开）。**菜单栏的 Refresh All 不够** —— 它
->    只重跑已注册的脚本路径，不会重新发现 bundle 入口。不重启的话，
->    SwiftBar 会一直按旧文件名 `claude-code.10s.sh` 调用，每次刷新都
->    报 `No such file or directory`。
->
-> Hook URL（`?name=claude-code`）和已写入 `~/.claude/settings.json`
-> 的命令路径都不变。
+卸载:`rm "$(defaults read com.ameba.SwiftBar PluginDirectory)/claude-code.swiftbar"`。
 
-## 手动安装
+## Hook 与 statusLine 在做什么
 
-不想跑脚本的话:
+`install.sh` 注册的 hook(`cc-status-writer`)让状态变成**事件驱动**:Claude Code 一发生权限请求 / 工具开始 / Stop 等事件,菜单栏 ~1s 内反映,而不是等 10s 兜底轮询。没装 hook 时插件回退到 JSONL 启发式,可用但有 10s 延迟。
 
-```bash
-ln -s "$(pwd)/claude-code.swiftbar" \
-      "$(defaults read com.ameba.SwiftBar PluginDirectory)/claude-code.swiftbar"
-```
+statusLine 钩子(`cc-meta-writer`)让会话内 `cd` 切目录后,菜单栏 1-2 秒内更新到新 cwd / model。
 
-仅软链不会注册 hook 与 statusLine —— 状态会回退到 10s 轮询的 JSONL 启发式，
-也不会捕获 `cd` 后的 cwd / model 元数据。要拿到完整体验，请跑 `./install.sh`。
+**已经装了别的 statusline 工具**(ccometix、claude-code-statusline-pro 等):脚本会警告并跳过,不覆盖你的配置。要兼容,在你现有的 statusline 命令最前面调一次 `cc-meta-writer`(它的 stdout 是空字符串,不影响展示)。
 
-## 仓库结构
+## 从 v2.x 升级到 v3.x
 
-```
-claude-code.swiftbar/        # SwiftBar packaged plugin bundle
-├── plugin.10s.sh            # 主脚本(10s 兜底刷新,hook 触发主动刷新)
-├── .Contents/Info.plist     # bundle metadata
-├── .bin/cc-jump             # 窗口跳转助手(bash 脚本)
-├── .bin/cc-status-writer    # Hook 事件→状态写入器(.cc-status.json)
-├── .bin/cc-meta-writer      # statusLine 元数据写入器(.cc-meta.json)
-└── .assets/icons/           # 菜单栏 / 菜单图标(.b64 + .png)
-```
-
-## 卸载
-
-```bash
-rm "$(defaults read com.ameba.SwiftBar PluginDirectory)/claude-code.swiftbar"
-```
+v3 把入口脚本从 `claude-code.10s.sh` 改名为 `plugin.10s.sh`,转为 SwiftBar 标准的 packaged plugin 形式。`git pull` + 重跑 `./install.sh` + **重启 SwiftBar**(`killall SwiftBar && open -a SwiftBar`,Refresh All 不够 —— 它只重跑已注册的脚本路径,不重新发现 bundle 入口)。
 
 ## License
 
