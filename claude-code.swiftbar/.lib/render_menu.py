@@ -6,12 +6,35 @@ import sys
 import json
 import time
 import subprocess
+import ctypes
+import ctypes.util
 from datetime import datetime
 
 projects_dir = sys.argv[1]
 jump_bin = sys.argv[2]
 icon_dir = sys.argv[3]
 now = time.time()
+
+# Display-sleep fast-path: when all screens are off (lid closed, display sleep,
+# or system sleep), skip all I/O and subprocess work — the menu bar is invisible.
+# CGDisplayIsAsleep is a CoreGraphics public API present since macOS 10.0.
+_CG = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreGraphics"))
+_CG.CGGetActiveDisplayList.restype = ctypes.c_int
+_CG.CGGetActiveDisplayList.argtypes = [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p]
+_CG.CGDisplayIsAsleep.restype = ctypes.c_int
+_CG.CGDisplayIsAsleep.argtypes = [ctypes.c_uint32]
+
+
+def _displays_asleep():
+    n = ctypes.c_uint32(0)
+    if _CG.CGGetActiveDisplayList(0, None, ctypes.byref(n)) != 0:
+        return False
+    if n.value == 0:
+        return True
+    displays = (ctypes.c_uint32 * n.value)()
+    if _CG.CGGetActiveDisplayList(n.value, displays, ctypes.byref(n)) != 0:
+        return False
+    return all(_CG.CGDisplayIsAsleep(d) for d in displays)
 
 
 def load_icon(name):
@@ -24,6 +47,16 @@ def load_icon(name):
 
 
 CC_APP_B64 = load_icon("cc-app")
+
+if _displays_asleep():
+    if CC_APP_B64:
+        print(f"🌑 | image={CC_APP_B64} width=21 height=24 color=gray")
+    else:
+        print("🌑")
+    print("---")
+    print("Display asleep | color=gray")
+    raise SystemExit(0)
+
 
 HOST_TAG = {
     "iterm": "  [iTerm]",
