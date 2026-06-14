@@ -23,12 +23,6 @@ def load_icon(name):
         return ""
 
 
-ICON_B64 = {
-    "iterm": load_icon("iterm"),
-    "idea": load_icon("idea"),
-    "vscode": load_icon("vscode"),
-}
-
 CC_APP_B64 = load_icon("cc-app")
 
 RUNNING_SECS = 30
@@ -861,14 +855,9 @@ else:
         # (so hover highlight & dark mode behave). Color signal lives in the icon.
         dim = s["state"] in ("idle", "unknown")
 
-        host = s["host"] if s["alive"] else "other"
-        host_b64 = ICON_B64.get(host, "") or CC_APP_B64
-
         params = f"bash='{jump_bin}' param1='{s['session']}' param2='{s['proj_path']}' terminal=false"
         if dim:
             params = "color=gray " + params
-        if host_b64:
-            params += f" image={host_b64} width=16 height=16"
         line = f"{icon} {s['proj']}  ({fmt_age(s['age'])} ago)"
         print(f"{line} | {params}")
         detail = (s["detail"] or "").replace("|", "/").replace("\n", " ")
