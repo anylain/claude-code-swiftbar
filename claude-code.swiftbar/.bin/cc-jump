@@ -160,7 +160,9 @@ APPLESCRIPT
     PID="${PID:-$(find_claude_pid "$PROJECT_CWD")}"
     if [ -n "$PID" ] && command -v tmux >/dev/null 2>&1; then
       ENV_STR=$(env_of "$PID")
-      TMUX_SOCKET=$(echo "$ENV_STR" | tr ' ' '\n' | grep '^TMUX=' | head -1 | cut -d= -f2-)
+      TMUX_RAW=$(echo "$ENV_STR" | tr ' ' '\n' | grep '^TMUX=' | head -1 | cut -d= -f2-)
+      # TMUX=<socket>,<pid>,<seq> — strip trailing <pid>,<seq> to get socket path
+      TMUX_SOCKET="${TMUX_RAW%,*,*}"
       TMUX_PANE=$(echo "$ENV_STR" | tr ' ' '\n' | grep '^TMUX_PANE=' | head -1 | cut -d= -f2-)
       if [ -n "$TMUX_PANE" ]; then
         # Resolve simple pane id (%0) to full target (session:window.pane)
