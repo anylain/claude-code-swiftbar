@@ -212,26 +212,27 @@ def host_from_entrypoint(ep):
 
 
 def read_hook_status(pdir, session_id=""):
-    """Read hook-written status file. Returns (state, detail) or (None, None).
-    state="ended" tombstones bypass HOOK_STATUS_TTL — once a session is over,
-    it stays over until SessionStart writes a new state. However, if the
-    tombstone's sid doesn't match the current session, the tombstone is stale
-    (belongs to an older session whose hook wrote it; the new session's hooks
-    may not have fired yet — e.g. VSCode extension sessions)."""
+    """Read hook-written status file. Returns (state, detail, sid, ts) or (None, None, None, 0)."""
     path = os.path.join(pdir, ".cc-status.json")
     try:
         with open(path) as f:
             d = json.load(f)
         state = d.get("state")
+        sid = d.get("sid", "")
+        ts = d.get("ts", 0)
         if state == "ended":
-            if session_id and d.get("sid", "") != session_id:
-                return None, None
-            return state, d.get("detail", "")
-        if now - d.get("ts", 0) < HOOK_STATUS_TTL:
-            return state, d.get("detail", "")
+            if session_id and sid and sid != session_id:
+                return None, None, None, 0
+            return state, d.get("detail", ""), sid, ts
+        # Non-ended: if sid differs from the jsonl session, the jsonl is stale.
+        # Trust the hook status unconditionally — it's the only signal we have.
+        if session_id and sid and sid != session_id:
+            return state, d.get("detail", ""), sid, ts
+        if now - ts < HOOK_STATUS_TTL:
+            return state, d.get("detail", ""), sid, ts
     except Exception:
         pass
-    return None, None
+    return None, None, None, 0
 
 
 def read_meta(pdir):
@@ -801,7 +802,7 @@ for proj, pdir, latest_path, latest_mtime, has_status_file, is_recent in prescan
 
     # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
     session_id = os.path.basename(files_latest).replace(".jsonl", "")
-    hook_state, hook_detail = read_hook_status(pdir, session_id)
+    hook_state, hook_detail, hook_sid, hook_ts = read_hook_status(pdir, session_id)
 
     sessions.append(
         {
@@ -815,6 +816,8 @@ for proj, pdir, latest_path, latest_mtime, has_status_file, is_recent in prescan
             "candidate_matched": candidate_matched,
             "hook_state": hook_state,
             "hook_detail": hook_detail,
+            "hook_sid": hook_sid,
+            "hook_ts": hook_ts,
             "host_from_ep": host_from_ep,
             "entries": entries,
         }
@@ -841,13 +844,25 @@ for idx, s in enumerate(sessions):
 
     if s["hook_state"]:
         state, detail = s["hook_state"], s["hook_detail"]
+        if s.get("hook_sid") and s["hook_sid"] != s["session"]:
+            s["session"] = s["hook_sid"]  # hook knows a newer session — use its id
+            if s.get("hook_ts"):
+                s["age"] = max(0, now - s["hook_ts"])  # use hook's timestamp for age
         if state == "ended":
             # SessionEnd tombstone — the session has explicitly exited. Don't let
             # JSONL is_recent keep it "alive" for the next 120s; drop it now.
             alive = False
             decision_path = "hook-ended"
         else:
-            alive = True  # hook only fires for live sessions
+            # Hook only fires for live sessions, so a non-ended state normally
+            # means the session is alive. Exception: when the hook's sid differs
+            # from the jsonl session AND no claude process matches, the new
+            # session may have died before writing a jsonl — fall back to
+            # mtime-based liveness instead of forcing alive=True.
+            if s.get("hook_sid") and s["hook_sid"] != s["session"] and not matched:
+                alive = s["is_recent"] or bool(matched)
+            else:
+                alive = True
             decision_path = "hook"
     else:
         state, detail = classify(s["entries"], s["mtime"], alive_proc=alive, has_active_child=has_child)
@@ -870,7 +885,7 @@ for idx, s in enumerate(sessions):
     s["matched"] = matched
     s["_decision_path"] = decision_path  # debug-only, popped below
     # Drop staging-only fields so downstream code sees the same shape as before.
-    for k in ("is_recent", "candidate_matched", "hook_state", "hook_detail", "host_from_ep", "entries"):
+    for k in ("is_recent", "candidate_matched", "hook_state", "hook_detail", "hook_sid", "hook_ts", "host_from_ep", "entries"):
         s.pop(k, None)
 
 # DEBUG (TEMPORARY): dump per-refresh decision snapshot. Pairs with writer's
