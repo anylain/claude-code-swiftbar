@@ -343,12 +343,17 @@ def inspect_claude_procs():
             if pid_comm.get(cpid, "") in TOOL_CHILD_COMMS:
                 info["has_active_child"] = True
                 break
-        # Host detection: env vars first, parent chain fallback
+        # Host detection: env vars first, parent chain fallback.
+        # tmux must come FIRST — when claude runs inside tmux, the terminal's
+        # env vars (ITERM_SESSION_ID, TERM_PROGRAM, etc.) may be pass-through
+        # and would otherwise misidentify the host as a bare terminal.
         env = info["env"]
         term_prog = env.get("TERM_PROGRAM", "")
-        if "ITERM_SESSION_ID" in env:
+        if env.get("TMUX"):
+            info["host"] = "tmux"
+        elif "ITERM_SESSION_ID" in env:
             info["host"] = "iterm"
-        elif term_prog == "Apple_Terminal":
+        elif env.get("TERM_PROGRAM", "") == "Apple_Terminal":
             info["host"] = "terminal"
         elif term_prog == "WarpTerminal":
             info["host"] = "warp"
@@ -388,13 +393,6 @@ def inspect_claude_procs():
         elif "CLAUDE_CODE_SSE_PORT" in env:
             # SSE port set by IDE plugin — fallback to parent chain
             info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
-        elif env.get("TMUX"):
-            # Running inside tmux. We can't cheaply identify the terminal behind
-            # tmux (the tmux server's parent chain doesn't include the terminal
-            # emulator — the client does, but it's a sibling, not an ancestor).
-            # For accurate terminal detection we'd need to find the tmux client
-            # pid via `tmux list-clients` and walk its parent chain.
-            info["host"] = "tmux"
         else:
             info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
         procs.append(info)
