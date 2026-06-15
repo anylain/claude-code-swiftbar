@@ -182,8 +182,26 @@ APPLESCRIPT
         fi
       fi
     fi
-    # Activate the terminal emulator (try iTerm, then Terminal)
+    # Activate the terminal emulator, then select the iTerm tab that owns
+    # the tmux client tty so the user lands on the right pane.
     /usr/bin/open -a iTerm 2>/dev/null || /usr/bin/open -a Terminal 2>/dev/null || true
+    CLIENT_TTY=$("$_TMUX_BIN" -S "${TMUX_SOCKET:-}" list-clients -F '#{client_tty}' 2>/dev/null | head -1)
+    if [ -n "$CLIENT_TTY" ]; then
+      /usr/bin/osascript -e "
+tell application \"iTerm2\"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if (tty of s) is \"$CLIENT_TTY\" then
+                    tell w to select t
+                    select s
+                    return
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell" 2>/dev/null || true
+    fi
     ;;
   *)
     /usr/bin/open "$PROJECT_CWD"
