@@ -91,6 +91,7 @@ HOST_TAG = {
     "androidstudio": "  [AndroidStudio]",
     "fleet": "  [Fleet]",
     "jetbrains": "  [JetBrains]",
+    "tmux": "  [tmux]",
 }
 
 RUNNING_SECS = 30
@@ -387,6 +388,13 @@ def inspect_claude_procs():
         elif "CLAUDE_CODE_SSE_PORT" in env:
             # SSE port set by IDE plugin — fallback to parent chain
             info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
+        elif env.get("TMUX"):
+            # Running inside tmux. We can't cheaply identify the terminal behind
+            # tmux (the tmux server's parent chain doesn't include the terminal
+            # emulator — the client does, but it's a sibling, not an ancestor).
+            # For accurate terminal detection we'd need to find the tmux client
+            # pid via `tmux list-clients` and walk its parent chain.
+            info["host"] = "tmux"
         else:
             info["host"] = host_from_parent(pid, pid_ppid, pid_comm)
         procs.append(info)
