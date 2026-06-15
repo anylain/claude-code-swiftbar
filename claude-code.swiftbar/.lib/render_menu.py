@@ -2,6 +2,7 @@
 # Renders the SwiftBar menu output for plugin.10s.sh.
 # argv: PROJECTS_DIR JUMP_BIN ICON_DIR
 import os
+import re
 import sys
 import json
 import time
@@ -210,16 +211,21 @@ def host_from_entrypoint(ep):
     return None  # cli or unknown — defer to process inspection
 
 
-def read_hook_status(pdir):
+def read_hook_status(pdir, session_id=""):
     """Read hook-written status file. Returns (state, detail) or (None, None).
     state="ended" tombstones bypass HOOK_STATUS_TTL — once a session is over,
-    it stays over until SessionStart writes a new state."""
+    it stays over until SessionStart writes a new state. However, if the
+    tombstone's sid doesn't match the current session, the tombstone is stale
+    (belongs to an older session whose hook wrote it; the new session's hooks
+    may not have fired yet — e.g. VSCode extension sessions)."""
     path = os.path.join(pdir, ".cc-status.json")
     try:
         with open(path) as f:
             d = json.load(f)
         state = d.get("state")
         if state == "ended":
+            if session_id and d.get("sid", "") != session_id:
+                return None, None
             return state, d.get("detail", "")
         if now - d.get("ts", 0) < HOOK_STATUS_TTL:
             return state, d.get("detail", "")
@@ -723,10 +729,12 @@ for p in procs:
         cwd_map.setdefault(p["cwd"], []).append(p)
 
 # Encoding: claude stores `/Users/x/foo` as proj-dir `-Users-x-foo`.
+# Claude Code replaces ALL non-alphanumeric characters with '-', not just '/'.
+# (e.g. `/Users/x/baize_qa_lc` → `-Users-x-baize-qa-lc`).
 proc_proj_keys = set()
 for cwd in cwd_map:
     if cwd.startswith("/"):
-        proc_proj_keys.add(cwd.replace("/", "-"))
+        proc_proj_keys.add(re.sub(r'[^a-zA-Z0-9]', '-', cwd))
 
 
 sessions = []
@@ -792,14 +800,15 @@ for proj, pdir, latest_path, latest_mtime, has_status_file, is_recent in prescan
         candidate_matched = sorted(candidate_matched, key=_ep_match_score)
 
     # Hook-written status takes priority when fresh (< HOOK_STATUS_TTL).
-    hook_state, hook_detail = read_hook_status(pdir)
+    session_id = os.path.basename(files_latest).replace(".jsonl", "")
+    hook_state, hook_detail = read_hook_status(pdir, session_id)
 
     sessions.append(
         {
             "proj": proj_name,
             "proj_path": proj_path,
             "pdir": pdir,
-            "session": os.path.basename(files_latest).replace(".jsonl", ""),
+            "session": session_id,
             "mtime": mtime,
             "age": now - mtime,
             "is_recent": is_recent,
