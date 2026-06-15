@@ -117,7 +117,7 @@ if event_name == "SessionEnd":
     write_status("ended", "session ended", ev_name=event_name)
 
 elif event_name == "SessionStart":
-    write_status("running", "starting session…", ev_name=event_name)
+    write_status("needs-input", "awaiting your input", ev_name=event_name)
 
 elif event_name == "UserPromptSubmit":
     write_status("running", "Claude is responding…", ev_name=event_name)
