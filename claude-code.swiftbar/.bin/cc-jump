@@ -8,6 +8,14 @@
 
 set -u
 
+# Resolve tmux to its absolute path — SwiftBar runs scripts with a minimal
+# PATH that doesn't include homebrew (/opt/homebrew/bin) or /usr/local/bin.
+_TMUX_BIN=""
+for _cand in /opt/homebrew/bin/tmux /usr/local/bin/tmux; do
+  [ -x "$_cand" ] && { _TMUX_BIN="$_cand"; break; }
+done
+[ -z "$_TMUX_BIN" ] && _TMUX_BIN="tmux"  # last-resort: trust PATH
+
 SESSION_ID="${1:-}"
 PROJECT_CWD="${2:-}"
 
@@ -158,7 +166,7 @@ APPLESCRIPT
     # Read TMUX socket + pane from the claude process env, switch tmux to
     # the pane where claude is running, then activate the terminal app.
     PID="${PID:-$(find_claude_pid "$PROJECT_CWD")}"
-    if [ -n "$PID" ] && command -v tmux >/dev/null 2>&1; then
+    if [ -n "$PID" ] && [ -n "$_TMUX_BIN" ]; then
       ENV_STR=$(env_of "$PID")
       TMUX_RAW=$(echo "$ENV_STR" | tr ' ' '\n' | grep '^TMUX=' | head -1 | cut -d= -f2-)
       # TMUX=<socket>,<pid>,<seq> — strip trailing <pid>,<seq> to get socket path
@@ -166,11 +174,11 @@ APPLESCRIPT
       TMUX_PANE=$(echo "$ENV_STR" | tr ' ' '\n' | grep '^TMUX_PANE=' | head -1 | cut -d= -f2-)
       if [ -n "$TMUX_PANE" ]; then
         # Resolve simple pane id (%0) to full target (session:window.pane)
-        FULL_TARGET=$(tmux -S "${TMUX_SOCKET:-}" display-message -t "$TMUX_PANE" \
+        FULL_TARGET=$("$_TMUX_BIN" -S "${TMUX_SOCKET:-}" display-message -t "$TMUX_PANE" \
           -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null)
         if [ -n "$FULL_TARGET" ]; then
-          tmux -S "${TMUX_SOCKET:-}" select-window -t "${FULL_TARGET%.*}" 2>/dev/null || true
-          tmux -S "${TMUX_SOCKET:-}" select-pane -t "$FULL_TARGET" 2>/dev/null || true
+          "$_TMUX_BIN" -S "${TMUX_SOCKET:-}" select-window -t "${FULL_TARGET%.*}" 2>/dev/null || true
+          "$_TMUX_BIN" -S "${TMUX_SOCKET:-}" select-pane -t "$FULL_TARGET" 2>/dev/null || true
         fi
       fi
     fi
